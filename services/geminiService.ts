@@ -2,13 +2,46 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Workout } from "../types";
 
-// Always initialize with process.env.API_KEY exclusively as per guidelines
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+/**
+ * Helper to get the AI instance safely.
+ * Per system instructions, we prioritize process.env.API_KEY.
+ * We also handle environments where 'process' might not be defined.
+ */
+const getApiKey = (): string | undefined => {
+  try {
+    // Attempt to get from mandated process.env
+    const envKey = typeof process !== 'undefined' ? process.env?.API_KEY : undefined;
+    if (envKey && envKey !== 'undefined' && envKey !== '') return envKey;
+
+    // Fallback to VITE_API_KEY as requested for the user's specific environment
+    const viteKey = (import.meta as any).env?.VITE_API_KEY;
+    if (viteKey && viteKey !== 'undefined' && viteKey !== '') return viteKey;
+    
+    return undefined;
+  } catch (e) {
+    return undefined;
+  }
+};
+
+const getAIInstance = () => {
+  const apiKey = getApiKey();
+  if (!apiKey) return null;
+  return new GoogleGenAI({ apiKey });
+};
+
+export const isAIConfigured = () => {
+  return !!getApiKey();
+};
+
+const CONFIG_ERROR_MSG = "AI is not configured. Please set the API_KEY environment variable to enable coaching features.";
 
 export const getWorkoutFeedback = async (history: Workout[]) => {
+  const ai = getAIInstance();
+  if (!ai) {
+    return CONFIG_ERROR_MSG;
+  }
+
   try {
-    const model = 'gemini-3-flash-preview';
-    
     const historySummary = history.slice(-5).map(w => ({
       date: w.date,
       title: w.title,
@@ -29,9 +62,8 @@ export const getWorkoutFeedback = async (history: Workout[]) => {
       3. Suggested improvements for the next session
     `;
 
-    // Direct call to generateContent using the global ai instance
     const response = await ai.models.generateContent({
-      model,
+      model: 'gemini-3-flash-preview',
       contents: prompt,
       config: {
         systemInstruction: "You are an elite bodybuilding and strength coach. Keep responses punchy, motivating, and professional."
@@ -45,12 +77,14 @@ export const getWorkoutFeedback = async (history: Workout[]) => {
 };
 
 export const generatePlan = async (goal: string) => {
+  const ai = getAIInstance();
+  if (!ai) {
+    return { error: CONFIG_ERROR_MSG };
+  }
+
   try {
-    const model = 'gemini-3-flash-preview';
-    
-    // Using generateContent for structured JSON response with responseSchema
     const response = await ai.models.generateContent({
-      model,
+      model: 'gemini-3-flash-preview',
       contents: `Generate a 1-day workout routine for a user whose goal is: ${goal}. Include 5-6 exercises with recommended sets and reps.`,
       config: {
         responseMimeType: "application/json",
@@ -81,6 +115,6 @@ export const generatePlan = async (goal: string) => {
     return JSON.parse(jsonStr);
   } catch (error) {
     console.error("Error generating plan:", error);
-    throw error;
+    return { error: "Failed to generate plan. Please try again." };
   }
 };

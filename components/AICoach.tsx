@@ -1,8 +1,8 @@
 
 import React, { useState } from 'react';
 import { Workout } from '../types';
-import { BrainCircuit, Sparkles, Send, Loader2, Dumbbell, Target } from 'lucide-react';
-import { getWorkoutFeedback, generatePlan } from '../services/geminiService';
+import { BrainCircuit, Sparkles, Send, Loader2, Dumbbell, Target, AlertCircle, ShieldAlert } from 'lucide-react';
+import { getWorkoutFeedback, generatePlan, isAIConfigured } from '../services/geminiService';
 
 interface AICoachProps {
   workouts: Workout[];
@@ -13,10 +13,14 @@ const AICoach: React.FC<AICoachProps> = ({ workouts }) => {
   const [loading, setLoading] = useState(false);
   const [goalPrompt, setGoalPrompt] = useState('');
   const [aiPlan, setAiPlan] = useState<any | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const aiEnabled = isAIConfigured();
 
   const fetchAnalysis = async () => {
-    if (workouts.length < 1) return;
+    if (workouts.length < 1 || !aiEnabled) return;
     setLoading(true);
+    setError(null);
     try {
       const result = await getWorkoutFeedback(workouts);
       setFeedback(result);
@@ -28,14 +32,19 @@ const AICoach: React.FC<AICoachProps> = ({ workouts }) => {
   };
 
   const handleGeneratePlan = async () => {
-    if (!goalPrompt) return;
+    if (!goalPrompt || !aiEnabled) return;
     setLoading(true);
+    setError(null);
     try {
       const plan = await generatePlan(goalPrompt);
-      setAiPlan(plan);
-      setGoalPrompt('');
+      if (plan.error) {
+        setError(plan.error);
+      } else {
+        setAiPlan(plan);
+        setGoalPrompt('');
+      }
     } catch (e) {
-      alert("Error generating plan.");
+      setError("Error generating plan.");
     } finally {
       setLoading(false);
     }
@@ -53,8 +62,27 @@ const AICoach: React.FC<AICoachProps> = ({ workouts }) => {
         </div>
       </div>
 
+      {!aiEnabled && (
+        <div className="bg-amber-500/10 border border-amber-500/20 p-4 rounded-2xl flex gap-3 items-start animate-in fade-in slide-in-from-top-2 duration-500">
+          <ShieldAlert className="text-amber-500 shrink-0" size={20} />
+          <div>
+            <h4 className="text-xs font-black text-amber-400 uppercase tracking-widest mb-1">AI Features Restricted</h4>
+            <p className="text-[10px] font-medium text-slate-400 leading-relaxed uppercase">
+              The Gemini API Key is missing. Set the <span className="text-white">API_KEY</span> (or <span className="text-white">VITE_API_KEY</span>) to enable personalized coaching.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-xl flex gap-2 items-center text-red-400 text-xs font-bold uppercase">
+          <AlertCircle size={14} />
+          {error}
+        </div>
+      )}
+
       {/* Analysis Section */}
-      <section className="bg-slate-800/50 border border-slate-700 rounded-2xl p-5 overflow-hidden relative">
+      <section className={`bg-slate-800/50 border border-slate-700 rounded-2xl p-5 overflow-hidden relative transition-opacity duration-300 ${!aiEnabled ? 'opacity-40 grayscale pointer-events-none' : ''}`}>
         <h3 className="text-sm font-bold text-slate-400 uppercase mb-4 flex items-center gap-2">
           <Sparkles size={14} className="text-indigo-400" />
           Progress Analysis
@@ -82,7 +110,7 @@ const AICoach: React.FC<AICoachProps> = ({ workouts }) => {
             <p className="text-sm text-slate-400 mb-4">I can analyze your last sessions to help you optimize your training.</p>
             <button 
               onClick={fetchAnalysis}
-              disabled={workouts.length < 1}
+              disabled={workouts.length < 1 || !aiEnabled}
               className="px-6 py-2.5 bg-indigo-500 disabled:bg-slate-700 text-white rounded-xl font-bold text-sm shadow-lg shadow-indigo-500/20 transition-all active:scale-95"
             >
               Start Analysis
@@ -92,7 +120,7 @@ const AICoach: React.FC<AICoachProps> = ({ workouts }) => {
       </section>
 
       {/* Planner Section */}
-      <section className="bg-slate-800/50 border border-slate-700 rounded-2xl p-5">
+      <section className={`bg-slate-800/50 border border-slate-700 rounded-2xl p-5 transition-opacity duration-300 ${!aiEnabled ? 'opacity-40 grayscale pointer-events-none' : ''}`}>
         <h3 className="text-sm font-bold text-slate-400 uppercase mb-4 flex items-center gap-2">
           <Target size={14} className="text-emerald-400" />
           AI Routine Generator
@@ -102,19 +130,20 @@ const AICoach: React.FC<AICoachProps> = ({ workouts }) => {
           <input 
             value={goalPrompt}
             onChange={(e) => setGoalPrompt(e.target.value)}
+            disabled={!aiEnabled}
             placeholder="e.g., hypertrophy for back and biceps"
             className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-indigo-500 disabled:opacity-50"
           />
           <button 
             onClick={handleGeneratePlan}
-            disabled={loading || !goalPrompt}
+            disabled={loading || !goalPrompt || !aiEnabled}
             className="p-3 bg-emerald-500 text-white rounded-xl active:scale-95 transition-transform disabled:opacity-50"
           >
             <Send size={20} />
           </button>
         </div>
 
-        {aiPlan && (
+        {aiPlan && !aiPlan.error && (
           <div className="mt-6 space-y-4">
             <div className="p-4 bg-slate-900 border border-emerald-500/30 rounded-xl">
               <h4 className="font-bold text-emerald-400 mb-4 flex items-center gap-2">
