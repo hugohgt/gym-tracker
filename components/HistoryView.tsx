@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { Workout, WorkoutType } from '../types';
-import { ChevronDown, ChevronUp, Trash2, Calendar, Clock, Dumbbell, Heart, Sparkles, Timer, Tag } from 'lucide-react';
+import { ChevronDown, ChevronUp, Trash2, Calendar, Clock, Dumbbell, Heart, Sparkles, Timer, Tag, AlertTriangle, X } from 'lucide-react';
 
 interface HistoryViewProps {
   workouts: Workout[];
@@ -10,13 +10,16 @@ interface HistoryViewProps {
 
 const HistoryView: React.FC<HistoryViewProps> = ({ workouts, onDelete }) => {
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [workoutToDelete, setWorkoutToDelete] = useState<Workout | null>(null);
 
   if (workouts.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center py-20 opacity-50">
-        <Calendar size={48} className="mb-4 text-slate-600" />
-        <p className="text-lg font-bold">Logbook is empty</p>
-        <p className="text-sm">Log a session to see history</p>
+        <div className="w-20 h-20 rounded-3xl bg-slate-800/50 border border-slate-700/50 flex items-center justify-center mb-6 shadow-xl">
+          <Calendar size={32} className="text-slate-600" />
+        </div>
+        <p className="text-lg font-black text-slate-100 uppercase tracking-widest">Logbook is empty</p>
+        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-[0.2em] mt-2">Log a session to see your history here.</p>
       </div>
     );
   }
@@ -30,26 +33,50 @@ const HistoryView: React.FC<HistoryViewProps> = ({ workouts, onDelete }) => {
     }
   };
 
+  const formatDate = (dateStr: string) => {
+    return new Date(dateStr).toLocaleDateString(undefined, { 
+      day: 'numeric', 
+      month: 'short', 
+      year: 'numeric' 
+    });
+  };
+
+  const handleConfirmDelete = () => {
+    if (workoutToDelete) {
+      if (expandedId === workoutToDelete.id) {
+        setExpandedId(null);
+      }
+      onDelete(workoutToDelete.id);
+      setWorkoutToDelete(null);
+    }
+  };
+
   return (
     <div className="space-y-4 pb-12">
-      <h2 className="text-xl font-bold mb-6">Logbook</h2>
+      <div className="flex justify-between items-center mb-6 px-2">
+        <h2 className="text-xl font-black text-white uppercase tracking-tighter">Logbook</h2>
+        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+          {workouts.length} Sessions
+        </span>
+      </div>
+
       {workouts.map((workout) => (
-        <div key={workout.id} className="bg-slate-800/50 border border-slate-700 rounded-3xl overflow-hidden shadow-sm transition-all">
+        <div key={workout.id} className="bg-slate-800/50 border border-slate-700 rounded-[2rem] overflow-hidden shadow-sm transition-all">
           <div 
-            className="p-5 flex items-center justify-between cursor-pointer active:bg-slate-800/80" 
+            className="p-5 flex items-center justify-between cursor-pointer active:bg-slate-800/80 transition-colors" 
             onClick={() => setExpandedId(expandedId === workout.id ? null : workout.id)}
           >
             <div className="flex-1">
               <div className="flex items-center gap-2 mb-1">
-                <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full border ${
+                <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-full border ${
                   workout.type === 'strength' ? 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20' : 
                   workout.type === 'cardio' ? 'text-cyan-400 bg-cyan-400/10 border-cyan-400/20' : 
                   'text-indigo-400 bg-indigo-400/10 border-indigo-400/20'
                 }`}>{workout.type}</span>
-                <span className="text-[10px] text-slate-500 font-bold uppercase">{new Date(workout.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">{formatDate(workout.date)}</span>
               </div>
               <h3 className="text-sm font-black text-slate-100 uppercase tracking-tight">{workout.title}</h3>
-              <div className="flex items-center gap-3 mt-1 text-[10px] font-bold text-slate-400">
+              <div className="flex items-center gap-3 mt-1 text-[9px] font-black text-slate-400 uppercase tracking-widest">
                 <div className="flex items-center gap-1">{getTypeIcon(workout.type)}{workout.exercises.length} Exercises</div>
               </div>
             </div>
@@ -57,7 +84,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ workouts, onDelete }) => {
           </div>
 
           {expandedId === workout.id && (
-            <div className="p-5 border-t border-slate-700 bg-slate-900/30 space-y-5 animate-in slide-in-from-top-2 duration-300">
+            <div className="p-5 border-t border-slate-700 bg-slate-900/30 space-y-6 animate-in slide-in-from-top-2 duration-300">
               {workout.exercises.map((ex, idx) => (
                 <div key={idx} className="space-y-3">
                   <div className="flex items-center justify-between">
@@ -66,7 +93,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ workouts, onDelete }) => {
                       {ex.name}
                     </h4>
                     {ex.category && (
-                      <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-[8px] font-black uppercase tracking-tighter">
+                      <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700 text-[8px] font-black uppercase tracking-widest">
                         <Tag size={8} /> {ex.category}
                       </span>
                     )}
@@ -82,7 +109,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ workouts, onDelete }) => {
 
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pl-3">
                     {ex.sets.map((s, sIdx) => (
-                      <div key={sIdx} className="bg-slate-800/80 p-2.5 rounded-xl text-center border border-slate-700/50 flex flex-col justify-center min-h-[50px]">
+                      <div key={sIdx} className="bg-slate-800/80 p-2.5 rounded-2xl text-center border border-slate-700/50 flex flex-col justify-center min-h-[55px] shadow-sm">
                         {workout.type === 'strength' && (
                           <>
                             {(!s.metricType || s.metricType === 'reps') ? (
@@ -124,9 +151,9 @@ const HistoryView: React.FC<HistoryViewProps> = ({ workouts, onDelete }) => {
                 <button 
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (confirm("Permanently delete this entry?")) onDelete(workout.id);
+                    setWorkoutToDelete(workout);
                   }} 
-                  className="text-[10px] font-black text-red-400 hover:text-red-300 flex items-center gap-1.5 uppercase tracking-widest transition-colors"
+                  className="text-[10px] font-black text-slate-600 hover:text-red-400 flex items-center gap-1.5 uppercase tracking-widest transition-colors py-2 px-3 rounded-xl hover:bg-red-500/5"
                 >
                   <Trash2 size={12} /> Delete Entry
                 </button>
@@ -135,6 +162,42 @@ const HistoryView: React.FC<HistoryViewProps> = ({ workouts, onDelete }) => {
           )}
         </div>
       ))}
+
+      {/* Delete Confirmation Modal */}
+      {workoutToDelete && (
+        <div className="fixed inset-0 z-[110] bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] w-full max-w-xs p-8 shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="flex flex-col items-center text-center">
+              <div className="w-16 h-16 rounded-3xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-500 mb-6">
+                <AlertTriangle size={32} />
+              </div>
+              <h2 className="text-xl font-black text-white uppercase tracking-tighter mb-2">Delete workout?</h2>
+              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-6">This action can’t be undone.</p>
+              
+              <div className="w-full bg-slate-950/50 rounded-2xl p-4 border border-slate-800/50 mb-8 text-left">
+                <p className="text-[8px] font-black text-slate-600 uppercase tracking-widest mb-1">Workout Details</p>
+                <p className="text-sm font-black text-white uppercase truncate">{workoutToDelete.title}</p>
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{formatDate(workoutToDelete.date)}</p>
+              </div>
+
+              <div className="w-full space-y-3">
+                <button 
+                  onClick={handleConfirmDelete}
+                  className="w-full py-4 bg-red-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest active:scale-95 transition-all shadow-lg shadow-red-500/20"
+                >
+                  Delete Session
+                </button>
+                <button 
+                  onClick={() => setWorkoutToDelete(null)}
+                  className="w-full py-4 text-slate-500 font-black text-[10px] uppercase tracking-widest hover:text-white transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
