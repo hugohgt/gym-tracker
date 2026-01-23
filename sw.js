@@ -1,9 +1,11 @@
 
 const CACHE_NAME = 'gym-tracker-v1';
 const ASSETS = [
-  './',
-  './index.html',
-  './manifest.webmanifest',
+  '/',
+  '/index.html',
+  '/manifest.webmanifest',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
   'https://cdn.tailwindcss.com',
   'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap'
 ];
