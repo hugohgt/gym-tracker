@@ -10,6 +10,26 @@ import Analytics from './components/Analytics';
 import TimerView from './components/TimerView';
 import ProfileSwitcher from './components/ProfileSwitcher';
 
+const STORAGE_KEY = 'gym-tracker:data';
+const STORAGE_VERSION = 1;
+
+type PersistedStateV1 = {
+  version: number;
+  workouts: Workout[];
+  profiles: UserProfile[];
+  activeUserId: string | null;
+  customCategories: string[];
+};
+
+function safeParse<T>(raw: string | null): T | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
 const App: React.FC = () => {
   const [activeView, setActiveView] = useState<ViewType>('dashboard');
   const [workouts, setWorkouts] = useState<Workout[]>([]);
@@ -17,6 +37,33 @@ const App: React.FC = () => {
   const [activeUserId, setActiveUserId] = useState<string | null>(null);
   const [customCategories, setCustomCategories] = useState<string[]>([]);
   const [isInitialized, setIsInitialized] = useState(false);
+
+useEffect(() => {
+  const saved = safeParse<PersistedStateV1>(localStorage.getItem(STORAGE_KEY));
+
+  if (saved && saved.version === STORAGE_VERSION) {
+    setWorkouts(saved.workouts ?? []);
+    setProfiles(saved.profiles ?? []);
+    setActiveUserId(saved.activeUserId ?? null);
+    setCustomCategories(saved.customCategories ?? []);
+  }
+
+  setIsInitialized(true);
+}, []);
+useEffect(() => {
+  if (!isInitialized) return;
+
+  const payload: PersistedStateV1 = {
+    version: STORAGE_VERSION,
+    workouts,
+    profiles,
+    activeUserId,
+    customCategories,
+  };
+
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+}, [workouts, profiles, activeUserId, customCategories, isInitialized]);
+
 
   // Helper to sort workouts by date newest first
   const sortWorkouts = (list: Workout[]) => {
