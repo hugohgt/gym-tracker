@@ -2,21 +2,11 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Workout } from "../types";
 
-// Factory function to get AI instance safely with the correct environment variable
-const getAI = () => {
-  // Use Vite-prefixed variable as requested for production/browser environments
-  const apiKey = (import.meta as any).env?.VITE_API_KEY || (typeof process !== 'undefined' ? process.env?.API_KEY : undefined);
-  
-  if (!apiKey) {
-    throw new Error("API Key must be set when running in a browser");
-  }
-  
-  return new GoogleGenAI({ apiKey });
-};
+// Always initialize with process.env.API_KEY exclusively as per guidelines
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 export const getWorkoutFeedback = async (history: Workout[]) => {
   try {
-    const ai = getAI();
     const model = 'gemini-3-flash-preview';
     
     const historySummary = history.slice(-5).map(w => ({
@@ -39,6 +29,7 @@ export const getWorkoutFeedback = async (history: Workout[]) => {
       3. Suggested improvements for the next session
     `;
 
+    // Direct call to generateContent using the global ai instance
     const response = await ai.models.generateContent({
       model,
       contents: prompt,
@@ -49,18 +40,15 @@ export const getWorkoutFeedback = async (history: Workout[]) => {
     return response.text;
   } catch (error) {
     console.error("Error getting AI feedback:", error);
-    if (error instanceof Error && error.message.includes("API Key")) {
-      return "MISSING_KEY";
-    }
     return "Failed to fetch AI feedback. Please try again later.";
   }
 };
 
 export const generatePlan = async (goal: string) => {
   try {
-    const ai = getAI();
     const model = 'gemini-3-flash-preview';
     
+    // Using generateContent for structured JSON response with responseSchema
     const response = await ai.models.generateContent({
       model,
       contents: `Generate a 1-day workout routine for a user whose goal is: ${goal}. Include 5-6 exercises with recommended sets and reps.`,

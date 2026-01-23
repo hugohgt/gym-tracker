@@ -1,7 +1,7 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Workout } from '../types';
-import { BrainCircuit, Sparkles, Send, Loader2, Dumbbell, Target, AlertCircle } from 'lucide-react';
+import { BrainCircuit, Sparkles, Send, Loader2, Dumbbell, Target } from 'lucide-react';
 import { getWorkoutFeedback, generatePlan } from '../services/geminiService';
 
 interface AICoachProps {
@@ -13,27 +13,13 @@ const AICoach: React.FC<AICoachProps> = ({ workouts }) => {
   const [loading, setLoading] = useState(false);
   const [goalPrompt, setGoalPrompt] = useState('');
   const [aiPlan, setAiPlan] = useState<any | null>(null);
-  const [apiKeyMissing, setApiKeyMissing] = useState(false);
-
-  useEffect(() => {
-    // Check for API key on mount
-    const key = (import.meta as any).env?.VITE_API_KEY || (typeof process !== 'undefined' ? process.env?.API_KEY : undefined);
-    if (!key) {
-      setApiKeyMissing(true);
-    }
-  }, []);
 
   const fetchAnalysis = async () => {
     if (workouts.length < 1) return;
     setLoading(true);
     try {
       const result = await getWorkoutFeedback(workouts);
-      if (result === "MISSING_KEY") {
-        setApiKeyMissing(true);
-        setFeedback(null);
-      } else {
-        setFeedback(result);
-      }
+      setFeedback(result);
     } catch (e) {
       setFeedback("Sorry, I couldn't crunch the numbers right now.");
     } finally {
@@ -49,11 +35,7 @@ const AICoach: React.FC<AICoachProps> = ({ workouts }) => {
       setAiPlan(plan);
       setGoalPrompt('');
     } catch (e) {
-      if (e instanceof Error && e.message.includes("API Key")) {
-        setApiKeyMissing(true);
-      } else {
-        alert("Error generating plan.");
-      }
+      alert("Error generating plan.");
     } finally {
       setLoading(false);
     }
@@ -70,26 +52,6 @@ const AICoach: React.FC<AICoachProps> = ({ workouts }) => {
           <p className="text-xs text-slate-500 uppercase font-black tracking-widest">Powered by Gemini 3</p>
         </div>
       </div>
-
-      {apiKeyMissing && (
-        <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-6 animate-in fade-in slide-in-from-top-2 duration-500">
-          <div className="flex items-center gap-3 text-amber-500 mb-3">
-            <AlertCircle size={24} />
-            <h3 className="font-black text-xs uppercase tracking-widest">AI Connection Required</h3>
-          </div>
-          <p className="text-xs text-slate-400 leading-relaxed font-medium uppercase tracking-wider mb-4">
-            AI analysis and routine generation require a Google Gemini API Key. Please ensure <span className="text-white font-bold">VITE_API_KEY</span> is set in your Vercel project environment variables and redeploy.
-          </p>
-          <a 
-            href="https://ai.google.dev/" 
-            target="_blank" 
-            rel="noopener noreferrer"
-            className="text-[10px] font-black text-amber-500 uppercase tracking-widest hover:underline"
-          >
-            Get a Free Key at ai.google.dev →
-          </a>
-        </div>
-      )}
 
       {/* Analysis Section */}
       <section className="bg-slate-800/50 border border-slate-700 rounded-2xl p-5 overflow-hidden relative">
@@ -108,21 +70,19 @@ const AICoach: React.FC<AICoachProps> = ({ workouts }) => {
             <div className="whitespace-pre-wrap text-slate-200 leading-relaxed bg-slate-900/40 p-4 rounded-xl border border-slate-700">
               {feedback}
             </div>
-            {!apiKeyMissing && (
-              <button 
-                onClick={fetchAnalysis}
-                className="mt-4 text-xs font-bold text-indigo-400 uppercase tracking-wider"
-              >
-                Refresh Analysis
-              </button>
-            )}
+            <button 
+              onClick={fetchAnalysis}
+              className="mt-4 text-xs font-bold text-indigo-400 uppercase tracking-wider"
+            >
+              Refresh Analysis
+            </button>
           </div>
         ) : (
           <div className="text-center py-4">
             <p className="text-sm text-slate-400 mb-4">I can analyze your last sessions to help you optimize your training.</p>
             <button 
               onClick={fetchAnalysis}
-              disabled={workouts.length < 1 || apiKeyMissing}
+              disabled={workouts.length < 1}
               className="px-6 py-2.5 bg-indigo-500 disabled:bg-slate-700 text-white rounded-xl font-bold text-sm shadow-lg shadow-indigo-500/20 transition-all active:scale-95"
             >
               Start Analysis
@@ -142,13 +102,12 @@ const AICoach: React.FC<AICoachProps> = ({ workouts }) => {
           <input 
             value={goalPrompt}
             onChange={(e) => setGoalPrompt(e.target.value)}
-            disabled={apiKeyMissing}
-            placeholder={apiKeyMissing ? "Configuration Required" : "e.g., hypertrophy for back and biceps"}
+            placeholder="e.g., hypertrophy for back and biceps"
             className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-indigo-500 disabled:opacity-50"
           />
           <button 
             onClick={handleGeneratePlan}
-            disabled={loading || !goalPrompt || apiKeyMissing}
+            disabled={loading || !goalPrompt}
             className="p-3 bg-emerald-500 text-white rounded-xl active:scale-95 transition-transform disabled:opacity-50"
           >
             <Send size={20} />
