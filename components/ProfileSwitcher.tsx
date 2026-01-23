@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { UserProfile, Workout } from '../types';
-import { Plus, X, User, Trash2, Edit2, Check, ArrowLeft, AlertTriangle, Calendar, Info, CheckCircle2, Download, Share2, Upload, AlertCircle, RefreshCw, Layers } from 'lucide-react';
+import { Plus, X, User, Trash2, Edit2, Check, ArrowLeft, AlertTriangle, Calendar, Info, CheckCircle2, Download, Upload, AlertCircle, RefreshCw, Layers } from 'lucide-react';
 
 interface ProfileSwitcherProps {
   profiles: UserProfile[];
@@ -107,7 +107,6 @@ const ProfileSwitcher: React.FC<ProfileSwitcherProps> = ({ profiles, activeUserI
         exportedAt: new Date().toISOString()
       };
 
-      // Sanitize name for filename: lowercase, spaces to hyphens, remove special chars
       const sanitizedName = activeName
         .toLowerCase()
         .replace(/\s+/g, '-')
@@ -149,7 +148,7 @@ const ProfileSwitcher: React.FC<ProfileSwitcherProps> = ({ profiles, activeUserI
         
         if (!data.version || !data.profiles || !Array.isArray(data.profiles)) {
           if (data.user && data.workouts) {
-            setToast({ message: "Outdated backup format. Please use a full bundle export.", type: 'error' });
+            setToast({ message: "Old format detected. Please export a new bundle first.", type: 'error' });
           } else {
             setToast({ message: "Invalid backup file structure.", type: 'error' });
           }
@@ -210,9 +209,6 @@ const ProfileSwitcher: React.FC<ProfileSwitcherProps> = ({ profiles, activeUserI
     }
   };
 
-  /**
-   * Typed summary for the import confirmation dialog to resolve unknown type issues.
-   */
   const getImportSummary = () => {
     if (!pendingImportData) return null;
     const data = pendingImportData as { profiles: UserProfile[], activeUserId: string, allWorkouts: Record<string, Workout[]> };
@@ -231,7 +227,6 @@ const ProfileSwitcher: React.FC<ProfileSwitcherProps> = ({ profiles, activeUserI
 
   const importSummary = getImportSummary();
   const deleteTarget = profiles.find(p => p.id === showDeleteModal);
-  const isActiveBeingDeleted = activeUserId === showDeleteModal;
   const activeUser = profiles.find(p => p.id === activeUserId);
 
   return (
@@ -294,14 +289,14 @@ const ProfileSwitcher: React.FC<ProfileSwitcherProps> = ({ profiles, activeUserI
                       {activeUser.name.charAt(0).toUpperCase()}
                     </div>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-3">
                     <button onClick={handleFilePicker} className="flex-1 py-3.5 bg-slate-800/80 border border-slate-700/60 hover:border-emerald-500/40 rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-[0.98] group">
                       <Upload size={14} className="text-emerald-400 group-hover:-translate-y-0.5 transition-transform" />
-                      <span className="text-[9px] font-black text-white uppercase tracking-[0.15em]">Import</span>
+                      <span className="text-[9px] font-black text-white uppercase tracking-[0.15em]">Import Profile</span>
                     </button>
                     <button onClick={handleExport} className="flex-1 py-3.5 bg-slate-800/80 border border-slate-700/60 hover:border-emerald-500/40 rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-[0.98] group">
                       <Download size={14} className="text-emerald-400 group-hover:translate-y-0.5 transition-transform" />
-                      <span className="text-[9px] font-black text-white uppercase tracking-[0.15em]">Export</span>
+                      <span className="text-[9px] font-black text-white uppercase tracking-[0.15em]">Export Profile</span>
                     </button>
                   </div>
                 </div>
@@ -336,14 +331,13 @@ const ProfileSwitcher: React.FC<ProfileSwitcherProps> = ({ profiles, activeUserI
         )}
       </div>
 
-      {/* Delete Confirmation Modal */}
       {showDeleteModal && deleteTarget && (
         <div className="fixed inset-0 z-[110] bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in duration-200">
           <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] w-full max-w-xs p-8 shadow-2xl animate-in zoom-in-95 duration-200">
             <div className="flex flex-col items-center text-center">
               <div className="w-16 h-16 rounded-3xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-500 mb-6"><AlertTriangle size={32} /></div>
               <h2 className="text-xl font-black text-white uppercase tracking-tighter mb-2">Delete profile?</h2>
-              <p className="text-xs font-medium text-slate-400 leading-relaxed mb-6 uppercase tracking-wider">This will remove the profile <span className="text-white font-black">"{deleteTarget.name}"</span>. {isActiveBeingDeleted && <span className="block mt-2 text-amber-400/80 font-black">This is your active profile.</span>}</p>
+              <p className="text-xs font-medium text-slate-400 leading-relaxed mb-6 uppercase tracking-wider">This will remove the profile <span className="text-white font-black">"{deleteTarget.name}"</span>.</p>
               <div className="w-full space-y-3">
                 <button onClick={() => executeDelete(deleteTarget.id, true)} className="w-full py-4 bg-red-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest active:scale-95 transition-all shadow-lg shadow-red-500/20">Delete User + Workouts</button>
                 <button onClick={() => executeDelete(deleteTarget.id, false)} className="w-full py-4 bg-slate-800 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest active:scale-95 transition-all">Delete User Only</button>
@@ -354,7 +348,6 @@ const ProfileSwitcher: React.FC<ProfileSwitcherProps> = ({ profiles, activeUserI
         </div>
       )}
 
-      {/* Import Confirmation Modal - UPDATED */}
       {pendingImportData && importSummary && (
         <div className="fixed inset-0 z-[110] bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in duration-200">
           <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] w-full max-w-[340px] p-8 shadow-2xl animate-in zoom-in-95 duration-200">
@@ -364,7 +357,7 @@ const ProfileSwitcher: React.FC<ProfileSwitcherProps> = ({ profiles, activeUserI
               </div>
               
               <div className="mb-6">
-                <h2 className="text-xl font-black text-white uppercase tracking-tighter mb-1">Import Data</h2>
+                <h2 className="text-xl font-black text-white uppercase tracking-tighter mb-1">Import Profile?</h2>
                 <div className="bg-slate-950/50 rounded-2xl py-3 px-4 border border-slate-800/50 mt-4">
                   <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Backup Contents</p>
                   <p className="text-sm font-black text-white uppercase">Profile: {importSummary.name}</p>
