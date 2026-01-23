@@ -1,0 +1,25 @@
+
+body {
+  font-family: 'Inter', sans-serif;
+  background-color: #0f172a; /* slate-900 */
+  color: #f8fafc; /* slate-50 */
+  overscroll-behavior-y: contain;
+}
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+input::-webkit-outer-spin-button,
+input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.mask-linear-right {
+  mask-image: linear-gradient(to right, black 85%, transparent 100%);
+}
