@@ -1,7 +1,7 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { Layout, LayoutDashboard, History, PlusCircle, BrainCircuit, BarChart3, ChevronRight, Dumbbell, Trash2, CheckCircle2, X, Timer as TimerIcon, User, Share } from 'lucide-react';
-import { Workout, ViewType, Exercise, Set as WorkoutSet, MUSCLE_GROUPS, UserProfile } from './types';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { LayoutDashboard, History, PlusCircle, BarChart3, User, Share, X, Timer as TimerIcon, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Workout, ViewType, UserProfile, MUSCLE_GROUPS } from './types';
 import Dashboard from './components/Dashboard';
 import HistoryView from './components/HistoryView';
 import WorkoutLogger from './components/WorkoutLogger';
@@ -9,27 +9,9 @@ import AICoach from './components/AICoach';
 import Analytics from './components/Analytics';
 import TimerView from './components/TimerView';
 import ProfileSwitcher from './components/ProfileSwitcher';
+import { loadState, saveState, createDefaultState, AppState } from './storage/appStorage';
 
-const STORAGE_KEY = 'gym-tracker:data';
-const STORAGE_VERSION = 1;
 const IOS_PROMPT_KEY = 'gym-tracker:ios-prompt-dismissed';
-
-type PersistedStateV1 = {
-  version: number;
-  workouts: Workout[];
-  profiles: UserProfile[];
-  activeUserId: string | null;
-  customCategories: string[];
-};
-
-function safeParse<T>(raw: string | null): T | null {
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return null;
-  }
-}
 
 const App: React.FC = () => {
   const [activeView, setActiveView] = useState<ViewType>('dashboard');
@@ -39,16 +21,25 @@ const App: React.FC = () => {
   const [customCategories, setCustomCategories] = useState<string[]>([]);
   const [isInitialized, setIsInitialized] = useState(false);
   const [showIOSPrompt, setShowIOSPrompt] = useState(false);
+  const [toast, setToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
+  
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Helper to sort workouts by date newest first
-  const sortWorkouts = (list: Workout[]) => {
-    return [...list].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  };
-
+  // Clear toast after 4 seconds
   useEffect(() => {
-    // Detect if we should show the iOS install prompt
+    if (toast) {
+      const timer = setTimeout(() => {
+        setToast(null);
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
+  // Initial Data Load
+  useEffect(() => {
+    // Detect iOS install prompt
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-    // @ts-ignore - standalone is an iOS specific property on navigator
+    // @ts-ignore
     const isStandalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
     const isDismissed = localStorage.getItem(IOS_PROMPT_KEY) === 'true';
 
@@ -56,94 +47,54 @@ const App: React.FC = () => {
       setShowIOSPrompt(true);
     }
 
-    const saved = safeParse<PersistedStateV1>(localStorage.getItem(STORAGE_KEY));
-    let initialWorkouts: Workout[] = [];
-    let initialProfiles: UserProfile[] = [];
-    let initialActiveId: string | null = null;
-    let initialCats: string[] = [...MUSCLE_GROUPS];
+    // Load state (automatically handles migrations and backup recovery)
+    const { state, recovered } = loadState();
 
-    if (saved && saved.version === STORAGE_VERSION) {
-      initialWorkouts = saved.workouts ?? [];
-      initialProfiles = saved.profiles ?? [];
-      initialActiveId = saved.activeUserId ?? null;
-      initialCats = saved.customCategories ?? [...MUSCLE_GROUPS];
-    } else {
-      // Fallback to legacy keys if storage_key is missing or version mismatch
-      const savedProfiles = safeParse<UserProfile[]>(localStorage.getItem('ironlog_profiles'));
-      const savedActiveUserId = localStorage.getItem('ironlog_active_user');
-      const savedCategories = safeParse<string[]>(localStorage.getItem('ironlog_categories'));
-      
-      if (savedProfiles) {
-        initialProfiles = savedProfiles;
-        initialActiveId = savedActiveUserId || (savedProfiles.length > 0 ? savedProfiles[0].id : null);
-      }
-      
-      if (savedCategories) {
-        initialCats = savedCategories;
-      }
-
-      // Legacy per-user workout loading for migration
-      if (initialProfiles.length > 0) {
-        const combinedLegacy: Workout[] = [];
-        initialProfiles.forEach(p => {
-          const ws = safeParse<Workout[]>(localStorage.getItem(`ironlog_workouts_${p.id}`));
-          if (ws) {
-            // Ensure each has the correct userId
-            combinedLegacy.push(...ws.map(w => ({ ...w, userId: p.id })));
-          }
-        });
-        initialWorkouts = combinedLegacy;
-      }
-    }
-
-    // Migration: assign orphaned workouts to the active user (or first profile)
-    const migrationTargetId = initialActiveId || (initialProfiles.length > 0 ? initialProfiles[0].id : null);
-    if (migrationTargetId) {
-      initialWorkouts = initialWorkouts.map(w => {
-        if (!w.userId) return { ...w, userId: migrationTargetId };
-        return w;
-      });
-    }
-
-    setWorkouts(sortWorkouts(initialWorkouts));
-    setProfiles(initialProfiles);
-    setActiveUserId(initialActiveId);
-    setCustomCategories(initialCats);
+    setWorkouts(state.workouts || []);
+    setProfiles(state.profiles || []);
+    setActiveUserId(state.activeUserId);
+    setCustomCategories(state.customCategories || [...MUSCLE_GROUPS]);
     setIsInitialized(true);
+
+    if (recovered) {
+      setToast({ message: "Recovered data from a backup", type: 'success' });
+    }
   }, []);
 
+  // Debounced Persistence
   useEffect(() => {
     if (!isInitialized) return;
 
-    const payload: PersistedStateV1 = {
-      version: STORAGE_VERSION,
-      workouts,
-      profiles,
-      activeUserId,
-      customCategories,
-    };
-
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-    
-    // Maintain legacy keys for extra safety, but STORAGE_KEY is now the main source
-    localStorage.setItem('ironlog_profiles', JSON.stringify(profiles));
-    if (activeUserId) {
-      localStorage.setItem('ironlog_active_user', activeUserId);
-      const userSpecificWorkouts = workouts.filter(w => w.userId === activeUserId);
-      localStorage.setItem(`ironlog_workouts_${activeUserId}`, JSON.stringify(userSpecificWorkouts));
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
     }
-    localStorage.setItem('ironlog_categories', JSON.stringify(customCategories));
+
+    saveTimeoutRef.current = setTimeout(() => {
+      const appState: AppState = {
+        version: 2, // Use current latest version
+        updatedAt: new Date().toISOString(),
+        profiles,
+        activeUserId,
+        customCategories,
+        workouts,
+      };
+      saveState(appState);
+    }, 400); // 400ms debounce
+
+    return () => {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    };
   }, [workouts, profiles, activeUserId, customCategories, isInitialized]);
 
   // Derived state: workouts for the current active user only
   const activeUserWorkouts = useMemo(() => {
     if (!activeUserId) return [];
-    return workouts.filter(w => w.userId === activeUserId);
+    return workouts.filter(w => w.userId === activeUserId).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [workouts, activeUserId]);
 
   const addWorkout = (newWorkout: Omit<Workout, 'userId'>) => {
     if (!activeUserId) {
-      alert("Please select or create a profile first.");
+      setToast({ message: "Please select or create a profile first", type: 'error' });
       setActiveView('profiles');
       return;
     }
@@ -160,12 +111,14 @@ const App: React.FC = () => {
       setCustomCategories(Array.from(newFoundCategories));
     }
 
-    setWorkouts(sortWorkouts([workoutWithUser, ...workouts]));
+    setWorkouts([workoutWithUser, ...workouts]);
     setActiveView('dashboard');
+    setToast({ message: "Workout saved", type: 'success' });
   };
 
   const deleteWorkout = (id: string) => {
     setWorkouts(workouts.filter(w => w.id !== id));
+    setToast({ message: "Workout deleted", type: 'success' });
   };
 
   const handleAddCategory = (cat: string) => {
@@ -183,7 +136,6 @@ const App: React.FC = () => {
   };
 
   const handleImportAll = (data: any, mode: 'replace' | 'merge') => {
-    // Standardize imported workouts to ensure userId exists
     const processImportedWorkouts = (wsMap: Record<string, Workout[]>) => {
       const flat: Workout[] = [];
       Object.entries(wsMap).forEach(([uid, ws]) => {
@@ -194,16 +146,15 @@ const App: React.FC = () => {
 
     if (mode === 'replace') {
       const importedWorkouts = data.allWorkouts ? processImportedWorkouts(data.allWorkouts) : [];
-      setWorkouts(sortWorkouts(importedWorkouts));
+      setWorkouts(importedWorkouts);
       setProfiles(data.profiles || []);
       setCustomCategories(data.customCategories || [...MUSCLE_GROUPS]);
       const nextActiveId = data.activeUserId || (data.profiles && data.profiles.length > 0 ? data.profiles[0].id : null);
       setActiveUserId(nextActiveId);
     } else {
-      // Merge logic
       const mergedProfiles = [...profiles];
       const mergedCategories = new Set([...customCategories, ...(data.customCategories || [])]);
-      const profileMap: Record<string, string> = {}; // importedId -> localId
+      const profileMap: Record<string, string> = {};
 
       (data.profiles || []).forEach((impProf: UserProfile) => {
         const existing = profiles.find(p => p.id === impProf.id || p.name.toLowerCase() === impProf.name.toLowerCase());
@@ -223,8 +174,6 @@ const App: React.FC = () => {
         if (!localUid) return;
 
         const wWithLocalUid = { ...impW, userId: localUid };
-        
-        // De-duplicate
         const signature = `${new Date(impW.date).getTime()}-${impW.title.toLowerCase()}-${impW.exercises.length}`;
         const alreadyExists = updatedWorkouts.some(existing => {
           if (existing.userId !== localUid) return false;
@@ -240,9 +189,8 @@ const App: React.FC = () => {
 
       setProfiles(mergedProfiles);
       setCustomCategories(Array.from(mergedCategories));
-      setWorkouts(sortWorkouts(updatedWorkouts));
+      setWorkouts(updatedWorkouts);
     }
-    
     setActiveView('dashboard');
   };
 
@@ -324,6 +272,15 @@ const App: React.FC = () => {
             >
               <X size={14} />
             </button>
+          </div>
+        </div>
+      )}
+
+      {toast && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[120] animate-in slide-in-from-top-4 fade-in duration-300 pointer-events-none">
+          <div className={`bg-slate-800/90 backdrop-blur-md border ${toast.type === 'error' ? 'border-red-500/50 shadow-red-500/10' : 'border-slate-700 shadow-2xl'} rounded-2xl px-6 py-3 flex items-center gap-3`}>
+            {toast.type === 'success' ? <CheckCircle2 size={16} className="text-emerald-400" /> : <AlertTriangle size={16} className="text-red-400" />}
+            <span className="text-[10px] font-black text-white uppercase tracking-widest">{toast.message}</span>
           </div>
         </div>
       )}
