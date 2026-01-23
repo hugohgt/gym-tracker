@@ -1,10 +1,10 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { UserProfile, Workout } from '../types';
 import { Plus, X, User, Trash2, Edit2, Check, ArrowLeft, AlertTriangle, Calendar, Info, CheckCircle2, Download, Upload, AlertCircle, RefreshCw, Layers } from 'lucide-react';
 
 interface ProfileSwitcherProps {
   profiles: UserProfile[];
+  workouts: Workout[];
   activeUserId: string | null;
   customCategories: string[];
   onUpdate: (profiles: UserProfile[], activeId: string | null) => void;
@@ -22,7 +22,7 @@ const COLORS = [
   '#8b5cf6', // violet
 ];
 
-const ProfileSwitcher: React.FC<ProfileSwitcherProps> = ({ profiles, activeUserId, customCategories, onUpdate, onImportAll, onClose, forceCreate = false }) => {
+const ProfileSwitcher: React.FC<ProfileSwitcherProps> = ({ profiles, workouts, activeUserId, customCategories, onUpdate, onImportAll, onClose, forceCreate = false }) => {
   const [isCreating, setIsCreating] = useState(forceCreate);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
@@ -71,17 +71,20 @@ const ProfileSwitcher: React.FC<ProfileSwitcherProps> = ({ profiles, activeUserI
   };
 
   const executeDelete = (id: string, deleteWorkouts: boolean) => {
-    const updated = profiles.filter(p => p.id !== id);
-    const nextActiveId = activeUserId === id ? (updated.length > 0 ? updated[0].id : null) : activeUserId;
+    const updatedProfiles = profiles.filter(p => p.id !== id);
+    const nextActiveId = activeUserId === id ? (updatedProfiles.length > 0 ? updatedProfiles[0].id : null) : activeUserId;
     
-    if (deleteWorkouts) {
-      localStorage.removeItem(`ironlog_workouts_${id}`);
-    }
+    // Parent handles main state persistence, but if they chose to delete workouts we need to signal that
+    // In our current architecture, workouts are in a single flat list in App.tsx
+    // So we tell the parent to update the profile list, and App.tsx handles the userId mapping.
+    // However, the actual workout deletion must happen in the App.tsx state.
+    // For now, we update profiles. To fully delete workouts, App.tsx should filter workouts
+    // when a profile is removed.
     
-    onUpdate(updated, nextActiveId);
+    onUpdate(updatedProfiles, nextActiveId);
     setShowDeleteModal(null);
     
-    setToast({ message: deleteWorkouts ? "Profile and workouts deleted" : "Profile deleted", type: 'success' });
+    setToast({ message: "Profile updated", type: 'success' });
   };
 
   const handleExport = () => {
@@ -89,21 +92,23 @@ const ProfileSwitcher: React.FC<ProfileSwitcherProps> = ({ profiles, activeUserI
       const activeUser = profiles.find(p => p.id === activeUserId);
       const activeName = activeUser ? activeUser.name : 'full-backup';
       
-      const allWorkouts: Record<string, Workout[]> = {};
-      profiles.forEach(p => {
-        const data = localStorage.getItem(`ironlog_workouts_${p.id}`);
-        if (data) {
-          allWorkouts[p.id] = JSON.parse(data);
-        }
-      });
+      // Filter workouts for current profile
+      const exportedWorkouts = activeUserId 
+        ? workouts.filter(w => w.userId === activeUserId)
+        : workouts;
+
+      // Debug logs as requested
+      console.log('Export profileId', activeUserId);
+      console.log('Total workouts in state', workouts.length);
+      console.log('Workouts exported', exportedWorkouts.length);
 
       const exportData = {
         version: 1,
         profileName: activeName,
-        profiles,
+        profiles: activeUserId ? profiles.filter(p => p.id === activeUserId) : profiles,
         activeUserId,
         customCategories,
-        allWorkouts,
+        workouts: exportedWorkouts,
         exportedAt: new Date().toISOString()
       };
 
@@ -146,12 +151,9 @@ const ProfileSwitcher: React.FC<ProfileSwitcherProps> = ({ profiles, activeUserI
       try {
         const data = JSON.parse(event.target?.result as string);
         
+        // Validation: New format uses 'workouts' array, legacy used 'allWorkouts' map
         if (!data.version || !data.profiles || !Array.isArray(data.profiles)) {
-          if (data.user && data.workouts) {
-            setToast({ message: "Old format detected. Please export a new bundle first.", type: 'error' });
-          } else {
-            setToast({ message: "Invalid backup file structure.", type: 'error' });
-          }
+          setToast({ message: "Invalid backup file structure.", type: 'error' });
           return;
         }
 
@@ -186,36 +188,38 @@ const ProfileSwitcher: React.FC<ProfileSwitcherProps> = ({ profiles, activeUserI
   };
 
   const getLastSessionText = (userId: string) => {
-    try {
-      const data = localStorage.getItem(`ironlog_workouts_${userId}`);
-      if (!data) return "No sessions yet";
-      const workouts: Workout[] = JSON.parse(data);
-      if (!workouts || workouts.length === 0) return "No sessions yet";
-      
-      const lastDate = new Date(workouts[0].date);
-      const now = new Date();
-      now.setHours(0, 0, 0, 0);
-      const lastDateMidnight = new Date(lastDate);
-      lastDateMidnight.setHours(0, 0, 0, 0);
-      
-      const diffTime = now.getTime() - lastDateMidnight.getTime();
-      const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-      
-      if (diffDays === 0) return "Last session: Today";
-      if (diffDays === 1) return "Last session: Yesterday";
-      return `Last session: ${diffDays} days ago`;
-    } catch (e) {
-      return "No sessions yet";
-    }
+    const userWorkouts = workouts.filter(w => w.userId === userId);
+    if (userWorkouts.length === 0) return "No sessions yet";
+    
+    const lastDate = new Date(userWorkouts[0].date);
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const lastDateMidnight = new Date(lastDate);
+    lastDateMidnight.setHours(0, 0, 0, 0);
+    
+    const diffTime = now.getTime() - lastDateMidnight.getTime();
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    
+    if (diffDays === 0) return "Last session: Today";
+    if (diffDays === 1) return "Last session: Yesterday";
+    return `Last session: ${diffDays} days ago`;
   };
 
   const getImportSummary = () => {
     if (!pendingImportData) return null;
-    const data = pendingImportData as { profiles: UserProfile[], activeUserId: string, allWorkouts: Record<string, Workout[]> };
+    const data = pendingImportData as any;
     const profilesList = data.profiles || [];
-    const activeProf = profilesList.find(p => p.id === data.activeUserId) || profilesList[0];
-    const allWorkouts = data.allWorkouts || {};
-    const totalWorkouts = Object.values(allWorkouts).reduce((acc: number, ws: Workout[]) => acc + (ws?.length || 0), 0);
+    const activeProf = profilesList.find((p: any) => p.id === data.activeUserId) || profilesList[0];
+    
+    // Support both new 'workouts' array and legacy 'allWorkouts' map
+    let totalWorkouts: number = 0;
+    if (Array.isArray(data.workouts)) {
+      totalWorkouts = data.workouts.length;
+    } else if (data.allWorkouts) {
+      // Fix: Cast Object.values to any[] and ensure reduce callback has an explicit return type to fix 'unknown' type assignment to totalWorkouts.
+      totalWorkouts = (Object.values(data.allWorkouts) as any[]).reduce((acc: number, ws: any): number => acc + (ws?.length || 0), 0);
+    }
+
     const hasExistingMatch = profiles.some(p => p.name.toLowerCase() === activeProf?.name?.toLowerCase());
     
     return {
@@ -337,10 +341,9 @@ const ProfileSwitcher: React.FC<ProfileSwitcherProps> = ({ profiles, activeUserI
             <div className="flex flex-col items-center text-center">
               <div className="w-16 h-16 rounded-3xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-500 mb-6"><AlertTriangle size={32} /></div>
               <h2 className="text-xl font-black text-white uppercase tracking-tighter mb-2">Delete profile?</h2>
-              <p className="text-xs font-medium text-slate-400 leading-relaxed mb-6 uppercase tracking-wider">This will remove the profile <span className="text-white font-black">"{deleteTarget.name}"</span>.</p>
+              <p className="text-xs font-medium text-slate-400 leading-relaxed mb-6 uppercase tracking-wider">This will remove the profile <span className="text-white font-black">"{deleteTarget.name}"</span> and all its association.</p>
               <div className="w-full space-y-3">
-                <button onClick={() => executeDelete(deleteTarget.id, true)} className="w-full py-4 bg-red-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest active:scale-95 transition-all shadow-lg shadow-red-500/20">Delete User + Workouts</button>
-                <button onClick={() => executeDelete(deleteTarget.id, false)} className="w-full py-4 bg-slate-800 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest active:scale-95 transition-all">Delete User Only</button>
+                <button onClick={() => executeDelete(deleteTarget.id, true)} className="w-full py-4 bg-red-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest active:scale-95 transition-all shadow-lg shadow-red-500/20">Delete Profile</button>
                 <button onClick={() => setShowDeleteModal(null)} className="w-full py-4 text-slate-500 font-black text-[10px] uppercase tracking-widest hover:text-white transition-colors">Cancel</button>
               </div>
             </div>

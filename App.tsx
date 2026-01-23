@@ -144,9 +144,11 @@ const App: React.FC = () => {
       return flat;
     };
 
+    // New format uses 'workouts' array, legacy used 'allWorkouts' map
+    const importedWorkoutsRaw = data.workouts || (data.allWorkouts ? processImportedWorkouts(data.allWorkouts) : []);
+
     if (mode === 'replace') {
-      const importedWorkouts = data.allWorkouts ? processImportedWorkouts(data.allWorkouts) : [];
-      setWorkouts(importedWorkouts);
+      setWorkouts(importedWorkoutsRaw);
       setProfiles(data.profiles || []);
       setCustomCategories(data.customCategories || [...MUSCLE_GROUPS]);
       const nextActiveId = data.activeUserId || (data.profiles && data.profiles.length > 0 ? data.profiles[0].id : null);
@@ -166,11 +168,10 @@ const App: React.FC = () => {
         }
       });
 
-      const importedFlat = data.allWorkouts ? processImportedWorkouts(data.allWorkouts) : [];
       const updatedWorkouts = [...workouts];
 
-      importedFlat.forEach(impW => {
-        const localUid = profileMap[impW.userId];
+      importedWorkoutsRaw.forEach((impW: Workout) => {
+        const localUid = profileMap[impW.userId] || impW.userId;
         if (!localUid) return;
 
         const wWithLocalUid = { ...impW, userId: localUid };
@@ -205,6 +206,7 @@ const App: React.FC = () => {
     return (
       <ProfileSwitcher 
         profiles={profiles} 
+        workouts={workouts}
         activeUserId={activeUserId} 
         onUpdate={handleProfileUpdate} 
         customCategories={customCategories}
@@ -219,6 +221,7 @@ const App: React.FC = () => {
       return (
         <ProfileSwitcher 
           profiles={profiles} 
+          workouts={workouts}
           activeUserId={activeUserId} 
           onUpdate={handleProfileUpdate} 
           customCategories={customCategories}
