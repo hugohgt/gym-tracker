@@ -28,25 +28,26 @@ export interface ExercisePR {
 
 export interface UserProfile {
   id: string;
+  user_id: string;
   name: string;
   color: string;
-  lastUsedAt?: string; // ISO date string for tracking last activity
-  prs?: Record<string, ExercisePR>; // Normalized exercise name -> PR data
+  last_used_at?: string; 
+  prs?: Record<string, ExercisePR>;
 }
 
 export interface Set {
   id: string;
-  weight?: number;      // Strength
-  reps?: number;        // Strength, Mobility
-  distance?: number;    // Cardio
-  time?: number;        // Cardio, Mobility (Duration/Hold)
-  pace?: string;        // Cardio (e.g. "5:30")
-  holdTime?: number;    // Mobility
+  weight?: number;      
+  reps?: number;        
+  distance?: number;    
+  time?: number;        
+  pace?: string;        
+  holdTime?: number;    
   unit?: WorkoutUnit;
-  rpe?: number;         // Rate of Perceived Exertion (1-10)
+  rpe?: number;         
   completed: boolean;
-  metricType?: 'reps' | 'sec' | 'min'; // New: type of the primary metric
-  metricValue?: number;               // New: value for the selected metric
+  metricType?: 'reps' | 'sec' | 'min'; 
+  metricValue?: number;               
 }
 
 export interface Exercise {
@@ -55,27 +56,30 @@ export interface Exercise {
   category: string; 
   tags?: string[];  
   sets: Set[];
-  isPR?: boolean;    // Indicates if this exercise achieved a PR in this specific workout
+  isPR?: boolean;    
 }
 
 export interface Workout {
   id: string;
-  userId: string; 
+  user_id: string; 
+  profile_id?: string;
   date: string;
   title: string;
   type: WorkoutType;
   quality?: WorkoutQuality;
   exercises: Exercise[];
   notes?: string;
-  duration?: number; // in minutes
+  duration?: number; 
+  userId?: string; // Support for legacy mapping
 }
 
 export interface WorkoutTemplate {
   id: string;
-  userId: string;
+  user_id: string;
   title: string;
   type: WorkoutType;
   exercises: Exercise[];
+  profile_id?: string;
 }
 
 export type ViewType = 'dashboard' | 'history' | 'log' | 'ai' | 'stats' | 'timer' | 'profiles';

@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { LayoutDashboard, History, PlusCircle, BarChart3, User, Share, X, Timer as TimerIcon, CheckCircle2, AlertTriangle, Layers, Trophy, ShieldCheck, Download, LogOut, Cloud, Settings, RefreshCw } from 'lucide-react';
+import { LayoutDashboard, History, PlusCircle, BarChart3, User, Share, X, Timer as TimerIcon, CheckCircle2, AlertTriangle, Layers, Trophy, ShieldCheck, Download, LogOut, Cloud, Settings, RefreshCw, Loader2 } from 'lucide-react';
 import { Workout, ViewType, UserProfile, MUSCLE_GROUPS, WorkoutTemplate, ExercisePR, Exercise } from './types';
 import Dashboard from './components/Dashboard';
 import HistoryView from './components/HistoryView';
@@ -11,14 +11,13 @@ import TimerView from './components/TimerView';
 import ProfileSwitcher from './components/ProfileSwitcher';
 import { AuthScreen } from './components/AuthScreen';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
-import { loadState, saveState, AppState, normalizeWorkout, normalizeTemplate, normalizeExerciseName, checkIsBackupDue, createBackupSnapshot, getLatestBackup, BackupSnapshot, migrateState, downloadAppStateAsJSON } from './storage/appStorage';
+import { normalizeWorkout, normalizeTemplate, migrateState, loadState } from './storage/appStorage';
 
 const IOS_PROMPT_KEY = 'gym-tracker:ios-prompt-dismissed';
 
 interface ToastState {
   message: string;
   type: 'success' | 'error';
-  durationMs?: number;
   id: number;
 }
 
@@ -31,13 +30,9 @@ const App: React.FC = () => {
   const [activeUserId, setActiveUserId] = useState<string | null>(null);
   const [customCategories, setCustomCategories] = useState<string[]>([]);
   const [isInitialized, setIsInitialized] = useState(false);
-  const [showIOSPrompt, setShowIOSPrompt] = useState(false);
   const [toast, setToastInternal] = useState<ToastState | null>(null);
   const [historyDateFilter, setHistoryDateFilter] = useState<string | null>(null);
-  const [justAchievedPR, setJustAchievedPR] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
-  
-  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const setToast = (t: Omit<ToastState, 'id'> | null) => {
     if (!t) {
@@ -45,105 +40,85 @@ const App: React.FC = () => {
       return;
     }
     setToastInternal({ ...t, id: Date.now() });
+    setTimeout(() => setToastInternal(null), 3000);
   };
 
-  // Auth Listener - Only run if supabase is configured
+  // 1. Auth Listener
   useEffect(() => {
     if (!isSupabaseConfigured) return;
-
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
     });
-
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
     });
-
     return () => subscription.unsubscribe();
   }, []);
 
-  // Initialize and Fetch Cloud Data
+  // 2. Fetch Initial Data from Supabase Tables
   useEffect(() => {
     if (!session || !isSupabaseConfigured) return;
 
-    const initializeData = async () => {
+    const fetchAllData = async () => {
       setIsSyncing(true);
       try {
-        const { data, error } = await supabase
-          .from('user_app_data')
-          .select('payload')
+        // Fetch Profiles
+        const { data: profileData, error: pError } = await supabase
+          .from('profiles')
+          .select('*')
           .eq('user_id', session.user.id)
-          .single();
+          .order('last_used_at', { ascending: false });
 
-        let stateToLoad: AppState;
+        if (pError) throw pError;
 
-        if (data && data.payload) {
-          stateToLoad = migrateState(data.payload);
-        } else {
-          const { state } = loadState();
-          stateToLoad = state;
+        // Fetch Workouts
+        const { data: workoutData, error: wError } = await supabase
+          .from('workouts')
+          .select('*')
+          .eq('user_id', session.user.id)
+          .order('date', { ascending: false });
+
+        if (wError) throw wError;
+
+        // Fetch Templates
+        const { data: templateData, error: tError } = await supabase
+          .from('templates')
+          .select('*')
+          .eq('user_id', session.user.id);
+
+        if (tError) throw tError;
+
+        const mappedProfiles = profileData || [];
+        setProfiles(mappedProfiles);
+        setWorkouts(workoutData || []);
+        setTemplates(templateData || []);
+        
+        // Auto-select the last used profile
+        if (mappedProfiles.length > 0) {
+          setActiveUserId(mappedProfiles[0].id);
         }
 
-        setWorkouts(stateToLoad.workouts || []);
-        setTemplates(stateToLoad.templates || []);
-        setProfiles(stateToLoad.profiles || []);
-        setActiveUserId(stateToLoad.activeUserId);
-        setCustomCategories(stateToLoad.customCategories || [...MUSCLE_GROUPS]);
+        setCustomCategories([...MUSCLE_GROUPS]); // Fallback or fetch from a settings table
         setIsInitialized(true);
-      } catch (err) {
-        console.error("Initialization error:", err);
+      } catch (err: any) {
+        console.error("Fetch Error:", err.message);
+        setToast({ message: "Failed to load cloud data", type: 'error' });
+        // Fallback to local storage if DB fails
+        const { state } = loadState();
+        setWorkouts(state.workouts || []);
+        setProfiles(state.profiles || []);
       } finally {
         setIsSyncing(false);
       }
     };
 
-    initializeData();
+    fetchAllData();
   }, [session]);
-
-  // Save to Cloud and Local periodically
-  useEffect(() => {
-    if (!isInitialized || !session || !isSupabaseConfigured) return;
-
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
-    }
-
-    saveTimeoutRef.current = setTimeout(async () => {
-      const appState: AppState = {
-        version: 2,
-        backupType: 'app',
-        updatedAt: new Date().toISOString(),
-        profiles,
-        activeUserId,
-        customCategories,
-        workouts: workouts.map(normalizeWorkout),
-        templates: templates.map(normalizeTemplate),
-      };
-
-      saveState(appState);
-
-      try {
-        await supabase
-          .from('user_app_data')
-          .upsert({ 
-            user_id: session.user.id, 
-            payload: appState,
-            updated_at: new Date().toISOString()
-          }, { onConflict: 'user_id' });
-      } catch (err) {
-        console.error("Cloud sync failed:", err);
-      }
-    }, 1000);
-
-    return () => {
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    };
-  }, [workouts, templates, profiles, activeUserId, customCategories, isInitialized, session]);
 
   const activeUserWorkouts = useMemo(() => {
     if (!activeUserId) return [];
     return workouts
-      .filter(w => w.userId === activeUserId)
+      .filter(w => w.profile_id === activeUserId || w.userId === activeUserId) // Support legacy keys during migration
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [workouts, activeUserId]);
 
@@ -153,54 +128,99 @@ const App: React.FC = () => {
     setActiveView(view);
   };
 
-  const addWorkout = (newWorkout: Omit<Workout, 'userId'>) => {
-    if (!activeUserId) {
-      setToast({ message: "Please select or create a profile first", type: 'error' });
-      setActiveView('profiles');
+  // 3. Structured Data Sync Functions
+  // Update signature to match WorkoutLogger's prop definition
+  const addWorkout = async (newWorkout: Omit<Workout, 'userId' | 'user_id'>) => {
+    if (!activeUserId || !session) {
+      setToast({ message: "Profile error", type: 'error' });
       return;
     }
-    const workoutWithUser: Workout = normalizeWorkout({ ...newWorkout, userId: activeUserId });
-    setWorkouts([workoutWithUser, ...workouts]);
-    setActiveView('dashboard');
-    setToast({ message: "Workout saved", type: 'success' });
+
+    setIsSyncing(true);
+    const workoutToSave = {
+      user_id: session.user.id,
+      profile_id: activeUserId,
+      date: newWorkout.date,
+      title: newWorkout.title,
+      type: newWorkout.type,
+      quality: newWorkout.quality,
+      exercises: newWorkout.exercises,
+      notes: newWorkout.notes,
+      duration: newWorkout.duration
+    };
+
+    try {
+      const { data, error } = await supabase
+        .from('workouts')
+        .insert([workoutToSave])
+        .select();
+
+      if (error) throw error;
+
+      setWorkouts([data[0], ...workouts]);
+      setActiveView('dashboard');
+      setToast({ message: "Workout synced to cloud", type: 'success' });
+    } catch (err: any) {
+      setToast({ message: "Sync failed. Saving locally.", type: 'error' });
+      setWorkouts([normalizeWorkout({ ...newWorkout, profile_id: activeUserId, user_id: session.user.id }), ...workouts]);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const deleteWorkout = async (id: string) => {
+    setIsSyncing(true);
+    try {
+      const { error } = await supabase.from('workouts').delete().eq('id', id);
+      if (error) throw error;
+      setWorkouts(workouts.filter(w => w.id !== id));
+      setToast({ message: "Workout deleted", type: 'success' });
+    } catch (err) {
+      setToast({ message: "Delete failed", type: 'error' });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleUpdateProfiles = async (updatedProfiles: UserProfile[], nextId: string | null) => {
+    setProfiles(updatedProfiles);
+    setActiveUserId(nextId);
+
+    // Sync profile changes to DB
+    if (session && isSupabaseConfigured) {
+      try {
+        // This is a simplified bulk update. In production, consider individual upserts.
+        for (const profile of updatedProfiles) {
+          await supabase.from('profiles').upsert({
+            id: profile.id,
+            user_id: session.user.id,
+            name: profile.name,
+            color: profile.color,
+            last_used_at: new Date().toISOString()
+          });
+        }
+      } catch (err) {
+        console.error("Profile sync error", err);
+      }
+    }
   };
 
   const handleLogout = async () => {
-    if (isSupabaseConfigured) {
-      await supabase.auth.signOut();
-    }
+    if (isSupabaseConfigured) await supabase.auth.signOut();
     setIsInitialized(false);
     setWorkouts([]);
     setProfiles([]);
+    setSession(null);
   };
 
-  // If Supabase is not configured, show a helpful setup screen
   if (!isSupabaseConfigured) {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-8 text-center">
-        <div className="w-20 h-20 rounded-3xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-500 mb-8">
-          <Settings size={40} className="animate-spin-slow" />
-        </div>
-        <h1 className="text-2xl font-black text-white uppercase tracking-tighter mb-4">Setup Required</h1>
-        <p className="text-sm text-slate-400 max-w-xs mb-8 leading-relaxed uppercase font-bold">
-          Your Supabase keys are missing. Please add <span className="text-white">NEXT_PUBLIC_SUPABASE_URL</span> and <span className="text-white">NEXT_PUBLIC_SUPABASE_ANON_KEY</span> to your Vercel Environment Variables.
+        <Settings size={48} className="text-amber-500 animate-spin-slow mb-6" />
+        <h1 className="text-2xl font-black text-white uppercase tracking-tighter mb-4">Configuration Error</h1>
+        <p className="text-slate-400 text-sm uppercase font-bold tracking-widest max-w-xs leading-relaxed">
+          Please check your Supabase environment variables in Vercel.
         </p>
-        <div className="space-y-4 w-full max-w-xs">
-          <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl text-left">
-            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Instructions</p>
-            <ol className="text-[9px] font-bold text-slate-300 space-y-2 uppercase tracking-tight">
-              <li>1. Go to Vercel Project Settings</li>
-              <li>2. Add the two Supabase keys</li>
-              <li>3. <span className="text-emerald-400">Important:</span> Re-deploy your app</li>
-            </ol>
-          </div>
-          <button 
-            onClick={() => window.location.reload()}
-            className="w-full bg-slate-800 text-white py-4 rounded-2xl font-black uppercase text-xs tracking-widest flex items-center justify-center gap-2 active:scale-95 transition-all"
-          >
-            <RefreshCw size={16} /> Check Again
-          </button>
-        </div>
       </div>
     );
   }
@@ -208,22 +228,27 @@ const App: React.FC = () => {
   if (!session) return <AuthScreen />;
 
   return (
-    <div className="flex flex-col min-h-screen max-w-md mx-auto bg-slate-900 overflow-x-hidden">
+    <div className="flex flex-col min-h-screen max-w-md mx-auto bg-slate-900 overflow-x-hidden font-sans">
       <header className="pt-8 pb-4 px-6 bg-slate-900/80 backdrop-blur-md border-b border-slate-800 flex justify-between items-center sticky top-0 z-10">
         <div>
-          <h1 className="text-2xl font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent uppercase tracking-tighter">
+          <h1 className="text-2xl font-black bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent uppercase tracking-tighter">
             GYM TRACKER
           </h1>
           <div className="flex items-center gap-1.5 mt-0.5">
-            <Cloud size={10} className={isSyncing ? "text-emerald-400 animate-pulse" : "text-slate-500"} />
-            <p className="text-[8px] text-slate-500 font-bold uppercase tracking-[0.2em]">Cloud Sync Active</p>
+            {isSyncing ? (
+              <RefreshCw size={10} className="text-emerald-400 animate-spin" />
+            ) : (
+              <Cloud size={10} className="text-emerald-500" />
+            )}
+            <p className="text-[8px] text-slate-500 font-bold uppercase tracking-[0.2em]">
+              {isSyncing ? 'Syncing...' : 'Cloud Connected'}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-3">
           <button 
             onClick={handleLogout}
             className="p-2.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-400 active:scale-95 transition-all"
-            title="Logout"
           >
             <LogOut size={16} />
           </button>
@@ -231,41 +256,51 @@ const App: React.FC = () => {
             onClick={() => handleNavigate('profiles')}
             className="w-10 h-10 rounded-full bg-slate-800 border-2 border-slate-700 flex items-center justify-center overflow-hidden transition-transform active:scale-95 shadow-lg"
           >
-            <User className="w-5 h-5 text-slate-500" />
+            {profiles.find(p => p.id === activeUserId)?.name.charAt(0) || <User size={18} />}
           </button>
         </div>
       </header>
 
       <main className="px-4 py-6 pb-32">
-        {activeView === 'dashboard' && <Dashboard workouts={activeUserWorkouts} onNavigate={handleNavigate} />}
-        {activeView === 'history' && <HistoryView workouts={activeUserWorkouts} onDelete={(id) => setWorkouts(workouts.filter(w => w.id !== id))} dateFilter={historyDateFilter} onClearFilter={() => setHistoryDateFilter(null)} />}
-        {activeView === 'log' && (
-          <WorkoutLogger 
-            onSave={addWorkout}
-            onSaveTemplate={(t) => setTemplates([...templates, normalizeTemplate({...t, userId: activeUserId!})])}
-            onCancel={() => setActiveView('dashboard')} 
-            previousWorkouts={activeUserWorkouts}
-            templates={templates.filter(t => t.userId === activeUserId)}
-            availableCategories={customCategories}
-            onAddCategory={(cat) => setCustomCategories([...customCategories, cat])}
-            onToast={setToast}
-          />
-        )}
-        {activeView === 'stats' && <Analytics workouts={activeUserWorkouts} />}
-        {activeView === 'timer' && <TimerView />}
-        {activeView === 'ai' && <AICoach workouts={activeUserWorkouts} />}
-        {activeView === 'profiles' && (
-           <ProfileSwitcher 
-           profiles={profiles} 
-           workouts={workouts}
-           templates={templates}
-           activeUserId={activeUserId} 
-           onUpdate={(updated, nextId) => { setProfiles(updated); setActiveUserId(nextId); }} 
-           customCategories={customCategories}
-           onImportAll={() => {}}
-           onClose={() => setActiveView('dashboard')}
-           onToast={setToast}
-         />
+        {!isInitialized ? (
+          <div className="flex flex-col items-center justify-center py-20 gap-4">
+            <Loader2 className="text-emerald-500 animate-spin" size={32} />
+            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Warming up...</p>
+          </div>
+        ) : (
+          <>
+            {activeView === 'dashboard' && <Dashboard workouts={activeUserWorkouts} onNavigate={handleNavigate} />}
+            {activeView === 'history' && <HistoryView workouts={activeUserWorkouts} onDelete={deleteWorkout} dateFilter={historyDateFilter} onClearFilter={() => setHistoryDateFilter(null)} />}
+            {activeView === 'log' && (
+              <WorkoutLogger 
+                onSave={addWorkout}
+                onSaveTemplate={(t) => setTemplates([...templates, normalizeTemplate({...t, user_id: session.user.id})])}
+                onCancel={() => setActiveView('dashboard')} 
+                previousWorkouts={activeUserWorkouts}
+                templates={templates}
+                availableCategories={customCategories}
+                onAddCategory={(cat) => setCustomCategories([...customCategories, cat])}
+                onToast={setToast}
+              />
+            )}
+            {activeView === 'stats' && <Analytics workouts={activeUserWorkouts} />}
+            {activeView === 'timer' && <TimerView />}
+            {activeView === 'ai' && <AICoach workouts={activeUserWorkouts} />}
+            {activeView === 'profiles' && (
+              <ProfileSwitcher 
+                profiles={profiles} 
+                workouts={workouts}
+                templates={templates}
+                activeUserId={activeUserId} 
+                currentAuthUserId={session.user.id}
+                onUpdate={handleUpdateProfiles} 
+                customCategories={customCategories}
+                onImportAll={() => {}}
+                onClose={() => setActiveView('dashboard')}
+                onToast={setToast}
+              />
+            )}
+          </>
         )}
       </main>
 
@@ -280,17 +315,13 @@ const App: React.FC = () => {
       </nav>
 
       {toast && (
-        <div 
-          key={toast.id}
-          className="fixed left-1/2 -translate-x-1/2 z-[9999] animate-toast pointer-events-auto w-full max-w-md px-5"
-          style={{ bottom: 'calc(100px + env(safe-area-inset-bottom))' }}
-        >
-          <div className="bg-slate-800/95 backdrop-blur-md border border-slate-700 rounded-[1.25rem] px-5 py-3.5 flex items-center gap-3 w-full justify-between transition-all">
+        <div className="fixed left-1/2 -translate-x-1/2 z-[9999] animate-toast pointer-events-auto w-full max-w-md px-5" style={{ bottom: 'calc(100px + env(safe-area-inset-bottom))' }}>
+          <div className="bg-slate-800/95 backdrop-blur-md border border-slate-700 rounded-2xl px-5 py-3 flex items-center gap-3 w-full justify-between shadow-2xl">
             <div className="flex items-center gap-3">
               {toast.type === 'success' ? <CheckCircle2 size={16} className="text-emerald-400" /> : <AlertTriangle size={16} className="text-red-400" />}
               <span className="text-[10px] font-black text-white uppercase tracking-widest">{toast.message}</span>
             </div>
-            <button onClick={() => setToastInternal(null)} className="p-1 text-slate-500 hover:text-white transition-colors ml-2"><X size={14} /></button>
+            <button onClick={() => setToastInternal(null)} className="p-1 text-slate-500 hover:text-white transition-colors"><X size={14} /></button>
           </div>
         </div>
       )}

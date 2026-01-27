@@ -4,8 +4,10 @@ import { Workout, Exercise, Set as WorkoutSet, WorkoutType, MUSCLE_GROUPS, Worko
 import { X, Plus, Trash2, CheckCircle, PlusCircle, Dumbbell, Calendar, Sparkles, Search, History as HistoryIcon, Heart, ArrowLeft, Tag, Copy, ChevronRight, Layers, Save, Star, MoreHorizontal, RotateCcw, Edit2, AlertCircle, Circle, CircleDot, CircleDashed, ChevronDown } from 'lucide-react';
 
 interface WorkoutLoggerProps {
-  onSave: (workout: Omit<Workout, 'userId'>) => void;
-  onSaveTemplate: (template: Omit<WorkoutTemplate, 'userId'>) => void;
+  // Use Omit to specify that user_id and profile_id are handled by the parent
+  onSave: (workout: Omit<Workout, 'userId' | 'user_id' | 'profile_id'>) => void;
+  // Use Omit to specify that user_id is handled by the parent
+  onSaveTemplate: (template: Omit<WorkoutTemplate, 'user_id'>) => void;
   onDeleteTemplate?: (id: string) => void;
   onUpdateTemplate?: (id: string, updates: Partial<WorkoutTemplate>) => void;
   onCancel: () => void;
@@ -292,8 +294,8 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
                 if (dist && time && dist > 0) {
                   const paceVal = time / dist; 
                   const min = Math.floor(paceVal);
-                  const sec = Math.round((paceVal - min) * 60);
-                  updatedSet.pace = `${min}:${sec.toString().padStart(2, '0')}`;
+                  const key_sec = Math.round((paceVal - min) * 60);
+                  updatedSet.pace = `${min}:${key_sec.toString().padStart(2, '0')}`;
                 }
               }
               return updatedSet;
@@ -325,6 +327,7 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
       return;
     }
 
+    // Call onSave without user_id and profile_id as they are handled by the parent
     onSave({
       id: Date.now().toString(),
       date: new Date(workoutDate).toISOString(),
@@ -346,6 +349,7 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
     if (!templateName.trim()) return alert("Enter a template name");
     if (!workoutType) return;
 
+    // Call onSaveTemplate without user_id as it is handled by the parent
     onSaveTemplate({
       id: Date.now().toString(),
       title: templateName,

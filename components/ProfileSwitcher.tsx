@@ -9,6 +9,7 @@ interface ProfileSwitcherProps {
   workouts: Workout[];
   templates: WorkoutTemplate[];
   activeUserId: string | null;
+  currentAuthUserId: string;
   customCategories: string[];
   onUpdate: (profiles: UserProfile[], activeId: string | null) => void;
   onImportAll: (data: any, mode: 'replace' | 'merge') => void;
@@ -26,7 +27,7 @@ const COLORS = [
   '#8b5cf6', // violet
 ];
 
-const ProfileSwitcher: React.FC<ProfileSwitcherProps> = ({ profiles, workouts, templates, activeUserId, customCategories, onUpdate, onImportAll, onClose, onToast, forceCreate = false }) => {
+const ProfileSwitcher: React.FC<ProfileSwitcherProps> = ({ profiles, workouts, templates, activeUserId, currentAuthUserId, customCategories, onUpdate, onImportAll, onClose, onToast, forceCreate = false }) => {
   const [isCreating, setIsCreating] = useState(forceCreate);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
@@ -72,11 +73,13 @@ const ProfileSwitcher: React.FC<ProfileSwitcherProps> = ({ profiles, workouts, t
       setToast({ message: validation.toast || 'Invalid name', type: 'error' });
       return;
     }
+    // Correctly using last_used_at and providing user_id
     const newProfile: UserProfile = {
       id: Date.now().toString(),
+      user_id: currentAuthUserId,
       name: newName.trim().replace(/\s+/g, ' '),
       color: selectedColor,
-      lastUsedAt: new Date().toISOString()
+      last_used_at: new Date().toISOString()
     };
     const updated = [...profiles, newProfile];
     onUpdate(updated, newProfile.id);
@@ -110,11 +113,12 @@ const ProfileSwitcher: React.FC<ProfileSwitcherProps> = ({ profiles, workouts, t
       const profileName = activeUser ? activeUser.name : 'full-app';
       
       const exportedWorkouts = activeUserId 
-        ? workouts.filter(w => w.userId === activeUserId)
+        ? workouts.filter(w => w.profile_id === activeUserId || w.userId === activeUserId)
         : workouts;
 
+      // templates use profile_id for association
       const exportedTemplates = activeUserId 
-        ? templates.filter(t => t.userId === activeUserId)
+        ? templates.filter(t => t.profile_id === activeUserId)
         : templates;
 
       const exportData = {
@@ -205,7 +209,8 @@ const ProfileSwitcher: React.FC<ProfileSwitcherProps> = ({ profiles, workouts, t
   };
 
   const getLastSessionText = (userId: string) => {
-    const userWorkouts = workouts.filter(w => w.userId === userId);
+    // Check both profile_id and legacy userId
+    const userWorkouts = workouts.filter(w => w.profile_id === userId || w.userId === userId);
     if (userWorkouts.length === 0) return "No sessions yet";
     const lastDate = new Date(userWorkouts[0].date);
     const now = new Date();
@@ -387,7 +392,7 @@ const ProfileSwitcher: React.FC<ProfileSwitcherProps> = ({ profiles, workouts, t
 
       {pendingImportData && importSummary && (
         <div className="fixed inset-0 z-[110] bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] w-full max-w-[340px] p-8 shadow-2xl animate-in zoom-in-95 duration-200">
+          <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] w-full max-[340px] p-8 shadow-2xl animate-in zoom-in-95 duration-200">
             <div className="flex flex-col items-center text-center">
               <div className={`w-16 h-16 rounded-3xl flex items-center justify-center mb-6 ${importSummary.isAppBackup ? 'bg-indigo-500/10 border border-indigo-500/20 text-indigo-400' : 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'}`}>
                 {importSummary.isAppBackup ? <ShieldCheck size={32} /> : <Layers size={32} />}
