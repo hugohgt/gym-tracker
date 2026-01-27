@@ -1,16 +1,51 @@
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Workout, WorkoutType } from '../types';
-import { ChevronDown, ChevronUp, Trash2, Calendar, Clock, Dumbbell, Heart, Sparkles, Timer, Tag, AlertTriangle, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Trash2, Calendar, Clock, Dumbbell, Heart, Sparkles, Timer, Tag, AlertTriangle, X, Trophy, Filter } from 'lucide-react';
 
 interface HistoryViewProps {
   workouts: Workout[];
   onDelete: (id: string) => void;
+  dateFilter?: string | null;
+  onClearFilter?: () => void;
 }
 
-const HistoryView: React.FC<HistoryViewProps> = ({ workouts, onDelete }) => {
+const HistoryView: React.FC<HistoryViewProps> = ({ workouts, onDelete, dateFilter, onClearFilter }) => {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [workoutToDelete, setWorkoutToDelete] = useState<Workout | null>(null);
+
+  const filteredWorkouts = useMemo(() => {
+    if (!dateFilter) return workouts;
+    const filterDateStr = new Date(dateFilter).toDateString();
+    return workouts.filter(w => new Date(w.date).toDateString() === filterDateStr);
+  }, [workouts, dateFilter]);
+
+  /**
+   * Safe helper to get exercise count from workout, checking legacy keys.
+   */
+  const getExerciseCount = (workout: any) => {
+    if (!workout) return 0;
+    const exercises = workout.exercises || workout.items || workout.movements || workout.entries || workout.workoutExercises;
+    const count = Array.isArray(exercises) ? exercises.length : 0;
+    
+    // Debug: Detect workouts with potential hidden data
+    if (count === 0) {
+      const keys = Object.keys(workout);
+      const dataKeys = ['items', 'movements', 'entries', 'workoutExercises'];
+      const foundLegacyKey = dataKeys.find(k => keys.includes(k) && Array.isArray(workout[k]) && workout[k].length > 0);
+      
+      if (foundLegacyKey) {
+        console.warn(`[DEBUG] Bad Workout Data Detected: count=0 but found legacy key "${foundLegacyKey}"`, {
+          id: workout.id,
+          date: workout.date,
+          keys: keys,
+          workout: workout
+        });
+      }
+    }
+    
+    return count;
+  };
 
   if (workouts.length === 0) {
     return (
@@ -54,13 +89,35 @@ const HistoryView: React.FC<HistoryViewProps> = ({ workouts, onDelete }) => {
   return (
     <div className="space-y-4 pb-12">
       <div className="flex justify-between items-center mb-6 px-2">
-        <h2 className="text-xl font-black text-white uppercase tracking-tighter">Logbook</h2>
+        <div>
+          <h2 className="text-xl font-black text-white uppercase tracking-tighter">Logbook</h2>
+          {dateFilter && (
+            <div className="flex items-center gap-2 mt-1">
+              <Filter size={10} className="text-emerald-400" />
+              <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">
+                Showing {formatDate(dateFilter)}
+              </span>
+              <button 
+                onClick={onClearFilter}
+                className="text-[10px] font-black text-slate-500 hover:text-white uppercase tracking-widest ml-1 underline"
+              >
+                Show all
+              </button>
+            </div>
+          )}
+        </div>
         <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
-          {workouts.length} Sessions
+          {filteredWorkouts.length} Sessions
         </span>
       </div>
 
-      {workouts.map((workout) => (
+      {filteredWorkouts.length === 0 && dateFilter && (
+        <div className="py-20 text-center opacity-30 uppercase font-black text-xs tracking-widest">
+          No sessions found for this date.
+        </div>
+      )}
+
+      {filteredWorkouts.map((workout) => (
         <div key={workout.id} className="bg-slate-800/50 border border-slate-700 rounded-[2rem] overflow-hidden shadow-sm transition-all">
           <div 
             className="p-5 flex items-center justify-between cursor-pointer active:bg-slate-800/80 transition-colors" 
@@ -73,11 +130,16 @@ const HistoryView: React.FC<HistoryViewProps> = ({ workouts, onDelete }) => {
                   workout.type === 'cardio' ? 'text-cyan-400 bg-cyan-400/10 border-cyan-400/20' : 
                   'text-indigo-400 bg-indigo-400/10 border-indigo-400/20'
                 }`}>{workout.type}</span>
+                {workout.quality && workout.quality !== 'normal' && (
+                  <span className="text-[8px] font-black uppercase text-slate-500 bg-slate-900/50 px-2 py-0.5 rounded-full border border-slate-700/50">
+                    {workout.quality}
+                  </span>
+                )}
                 <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">{formatDate(workout.date)}</span>
               </div>
               <h3 className="text-sm font-black text-slate-100 uppercase tracking-tight">{workout.title}</h3>
               <div className="flex items-center gap-3 mt-1 text-[9px] font-black text-slate-400 uppercase tracking-widest">
-                <div className="flex items-center gap-1">{getTypeIcon(workout.type)}{workout.exercises.length} Exercises</div>
+                <div className="flex items-center gap-1">{getTypeIcon(workout.type)}{getExerciseCount(workout)} Exercises</div>
               </div>
             </div>
             {expandedId === workout.id ? <ChevronUp className="text-slate-500" /> : <ChevronDown className="text-slate-500" />}
@@ -85,12 +147,13 @@ const HistoryView: React.FC<HistoryViewProps> = ({ workouts, onDelete }) => {
 
           {expandedId === workout.id && (
             <div className="p-5 border-t border-slate-700 bg-slate-900/30 space-y-6 animate-in slide-in-from-top-2 duration-300">
-              {workout.exercises.map((ex, idx) => (
+              {workout.exercises && workout.exercises.length > 0 ? workout.exercises.map((ex, idx) => (
                 <div key={idx} className="space-y-3">
                   <div className="flex items-center justify-between">
                     <h4 className="text-xs font-black text-slate-100 flex items-center gap-2 uppercase tracking-tight">
                       <span className={`w-1 h-3 rounded-full ${workout.type === 'strength' ? 'bg-emerald-500' : workout.type === 'cardio' ? 'bg-cyan-500' : 'bg-indigo-500'}`}></span>
                       {ex.name}
+                      {ex.isPR && <Trophy size={12} className="text-yellow-400 fill-current ml-1" />}
                     </h4>
                     {ex.category && (
                       <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700 text-[8px] font-black uppercase tracking-widest">
@@ -146,7 +209,11 @@ const HistoryView: React.FC<HistoryViewProps> = ({ workouts, onDelete }) => {
                     ))}
                   </div>
                 </div>
-              ))}
+              )) : (
+                <div className="py-8 text-center bg-slate-900/50 rounded-2xl border border-dashed border-slate-800">
+                   <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest">No detailed exercise data found for this entry.</p>
+                </div>
+              )}
               <div className="pt-4 border-t border-slate-800 flex justify-end">
                 <button 
                   onClick={(e) => {

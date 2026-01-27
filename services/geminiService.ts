@@ -3,43 +3,24 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { Workout } from "../types";
 
 /**
- * Helper to get the AI instance safely.
- * Per system instructions, we prioritize process.env.API_KEY.
- * We also handle environments where 'process' might not be defined.
+ * Helper to check if AI is configured.
+ * Per guidelines, the API key must be obtained exclusively from process.env.API_KEY.
  */
-const getApiKey = (): string | undefined => {
-  try {
-    // Attempt to get from mandated process.env
-    const envKey = typeof process !== 'undefined' ? process.env?.API_KEY : undefined;
-    if (envKey && envKey !== 'undefined' && envKey !== '') return envKey;
-
-    // Fallback to VITE_API_KEY as requested for the user's specific environment
-    const viteKey = (import.meta as any).env?.VITE_API_KEY;
-    if (viteKey && viteKey !== 'undefined' && viteKey !== '') return viteKey;
-    
-    return undefined;
-  } catch (e) {
-    return undefined;
-  }
-};
-
-const getAIInstance = () => {
-  const apiKey = getApiKey();
-  if (!apiKey) return null;
-  return new GoogleGenAI({ apiKey });
-};
-
 export const isAIConfigured = () => {
-  return !!getApiKey();
+  return !!process.env.API_KEY;
 };
 
 const CONFIG_ERROR_MSG = "AI is not configured. Please set the API_KEY environment variable to enable coaching features.";
 
 export const getWorkoutFeedback = async (history: Workout[]) => {
-  const ai = getAIInstance();
-  if (!ai) {
+  // Obtain API key exclusively from process.env.API_KEY as mandated by guidelines.
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) {
     return CONFIG_ERROR_MSG;
   }
+
+  // Create a new GoogleGenAI instance right before making an API call to ensure use of the most up-to-date configuration.
+  const ai = new GoogleGenAI({ apiKey });
 
   try {
     const historySummary = history.slice(-5).map(w => ({
@@ -69,7 +50,7 @@ export const getWorkoutFeedback = async (history: Workout[]) => {
         systemInstruction: "You are an elite bodybuilding and strength coach. Keep responses punchy, motivating, and professional."
       }
     });
-    return response.text;
+    return response.text || "No feedback available at this time.";
   } catch (error) {
     console.error("Error getting AI feedback:", error);
     return "Failed to fetch AI feedback. Please try again later.";
@@ -77,10 +58,14 @@ export const getWorkoutFeedback = async (history: Workout[]) => {
 };
 
 export const generatePlan = async (goal: string) => {
-  const ai = getAIInstance();
-  if (!ai) {
+  // Obtain API key exclusively from process.env.API_KEY as mandated by guidelines.
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) {
     return { error: CONFIG_ERROR_MSG };
   }
+
+  // Create a new GoogleGenAI instance right before making an API call to ensure use of the most up-to-date configuration.
+  const ai = new GoogleGenAI({ apiKey });
 
   try {
     const response = await ai.models.generateContent({

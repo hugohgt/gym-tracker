@@ -17,10 +17,21 @@ export type WorkoutUnit = 'reps' | 'sec' | 'min' | 'meters' | 'km';
 
 export type WorkoutType = 'strength' | 'cardio' | 'mobility';
 
+export type WorkoutQuality = 'normal' | 'light' | 'incomplete';
+
+export interface ExercisePR {
+  bestE1RM: number;
+  bestWeight: number;
+  bestVolume: number;
+  lastPRDate: string; // ISO date
+}
+
 export interface UserProfile {
   id: string;
   name: string;
   color: string;
+  lastUsedAt?: string; // ISO date string for tracking last activity
+  prs?: Record<string, ExercisePR>; // Normalized exercise name -> PR data
 }
 
 export interface Set {
@@ -41,20 +52,30 @@ export interface Set {
 export interface Exercise {
   id: string;
   name: string;
-  category: string; // Changed from MuscleGroup to string for flexibility
-  tags?: string[];  // Added tags for additional categorization
+  category: string; 
+  tags?: string[];  
   sets: Set[];
+  isPR?: boolean;    // Indicates if this exercise achieved a PR in this specific workout
 }
 
 export interface Workout {
   id: string;
-  userId: string; // Added userId for multi-user support
+  userId: string; 
   date: string;
   title: string;
   type: WorkoutType;
+  quality?: WorkoutQuality;
   exercises: Exercise[];
   notes?: string;
   duration?: number; // in minutes
+}
+
+export interface WorkoutTemplate {
+  id: string;
+  userId: string;
+  title: string;
+  type: WorkoutType;
+  exercises: Exercise[];
 }
 
 export type ViewType = 'dashboard' | 'history' | 'log' | 'ai' | 'stats' | 'timer' | 'profiles';

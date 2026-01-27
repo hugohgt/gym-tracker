@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { Play, Pause, RotateCcw, Timer as TimerIcon, Hourglass, Bell, AlertCircle, Zap, ShieldAlert, Trophy, Minus, Plus } from 'lucide-react';
 
@@ -148,7 +147,7 @@ const TimerView: React.FC = () => {
   };
 
   return (
-    <div className="w-full max-w-md mx-auto space-y-6 flex flex-col items-center">
+    <div className="w-full max-md mx-auto space-y-6 flex flex-col items-center">
       {/* Segmented Control */}
       <div className="flex bg-slate-800/50 p-1 rounded-2xl border border-slate-700/50 w-full">
         <button 
@@ -203,9 +202,17 @@ const TimerView: React.FC = () => {
             </button>
             <div className="w-14" />
           </div>
-          <div className="grid grid-cols-5 gap-2 px-1">
-            {[30, 60, 90, 120, 180].map((s) => (
-              <button key={s} onClick={() => handlePreset(s)} className={`py-3.5 rounded-xl border text-[9px] font-black uppercase tracking-tight transition-all ${initialRestTime === s ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400' : 'bg-slate-800/40 border-slate-700 text-slate-500 hover:border-slate-500'}`}>
+          <div className="grid grid-cols-3 gap-3 px-1">
+            {[30, 60, 90, 120, 150, 180].map((s) => (
+              <button 
+                key={s} 
+                onClick={() => handlePreset(s)} 
+                className={`py-5 rounded-2xl border text-[11px] font-black uppercase tracking-tight transition-all ${
+                  initialRestTime === s 
+                    ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400' 
+                    : 'bg-slate-800/40 border-slate-700 text-slate-500 hover:border-slate-500'
+                }`}
+              >
                 {s}s
               </button>
             ))}

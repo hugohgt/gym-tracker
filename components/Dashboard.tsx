@@ -1,16 +1,31 @@
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { Workout, ViewType, WorkoutType } from '../types';
 import { ChevronRight, Flame, Trophy, Calendar as CalendarIcon, Zap, ChevronLeft, Dumbbell, Heart, Sparkles, Lightbulb } from 'lucide-react';
 
 interface DashboardProps {
   workouts: Workout[];
-  onNavigate: (view: ViewType) => void;
+  onNavigate: (view: ViewType, data?: any) => void;
+  isNewPR?: boolean;
+  onClearPRFlag?: () => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ workouts, onNavigate }) => {
+const Dashboard: React.FC<DashboardProps> = ({ workouts, onNavigate, isNewPR, onClearPRFlag }) => {
+  const [viewDate, setViewDate] = useState(new Date());
+  const touchStartX = useRef<number | null>(null);
+  
   const lastWorkout = workouts[0];
   const workoutCount = workouts.length;
+
+  // One-time animation trigger logic
+  useEffect(() => {
+    if (isNewPR) {
+      const timer = setTimeout(() => {
+        if (onClearPRFlag) onClearPRFlag();
+      }, 2000); // Reset flag after animation completes
+      return () => clearTimeout(timer);
+    }
+  }, [isNewPR, onClearPRFlag]);
 
   const getStreak = () => {
     if (workouts.length === 0) return 0;
@@ -27,19 +42,47 @@ const Dashboard: React.FC<DashboardProps> = ({ workouts, onNavigate }) => {
   }, [workouts]);
 
   const calendarDays = useMemo(() => {
-    const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    const startOfMonth = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1);
+    const endOfMonth = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0);
     
     const days = [];
     for (let i = 0; i < startOfMonth.getDay(); i++) {
       days.push(null);
     }
     for (let i = 1; i <= endOfMonth.getDate(); i++) {
-      days.push(new Date(now.getFullYear(), now.getMonth(), i));
+      days.push(new Date(viewDate.getFullYear(), viewDate.getMonth(), i));
     }
     return days;
-  }, []);
+  }, [viewDate]);
+
+  const prevMonth = () => {
+    setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1));
+  };
+
+  const nextMonth = () => {
+    setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1));
+  };
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX.current === null) return;
+    const touchEndX = e.changedTouches[0].clientX;
+    const deltaX = touchStartX.current - touchEndX;
+    if (Math.abs(deltaX) > 50) {
+      if (deltaX > 0) nextMonth();
+      else prevMonth();
+    }
+    touchStartX.current = null;
+  };
+
+  const handleDayClick = (date: Date) => {
+    if (trainingDays.has(date.toDateString())) {
+      onNavigate('history', date.toISOString());
+    }
+  };
 
   const weeklyInsight = useMemo(() => {
     // If the user has never trained, do not show the insight card
@@ -95,7 +138,8 @@ const Dashboard: React.FC<DashboardProps> = ({ workouts, onNavigate }) => {
     return null;
   }, [workouts, lastWorkout]);
 
-  const monthName = new Date().toLocaleString('default', { month: 'long' });
+  const monthName = viewDate.toLocaleString('en-US', { month: 'long' });
+  const yearName = viewDate.getFullYear();
 
   const getTypeIcon = (type: WorkoutType) => {
     switch (type) {
@@ -105,6 +149,8 @@ const Dashboard: React.FC<DashboardProps> = ({ workouts, onNavigate }) => {
       default: return <Zap size={14} />;
     }
   };
+
+  const hasAnyPR = lastWorkout?.exercises.some(ex => ex.isPR);
 
   return (
     <div className="w-full max-w-[520px] mx-auto space-y-6">
@@ -131,15 +177,23 @@ const Dashboard: React.FC<DashboardProps> = ({ workouts, onNavigate }) => {
         </div>
       </div>
 
-      <div className="bg-slate-800/40 border border-slate-700/60 p-5 rounded-[2rem]">
+      <div 
+        className="bg-slate-800/40 border border-slate-700/60 p-5 rounded-[2rem] select-none"
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+      >
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] flex items-center gap-2">
             <CalendarIcon size={12} className="text-emerald-400" />
             Training Calendar
           </h3>
-          <span className="text-[10px] font-black text-emerald-400 uppercase bg-emerald-400/10 px-2 py-0.5 rounded-full">
-            {monthName}
-          </span>
+          <div className="flex items-center gap-3">
+            <button onClick={prevMonth} className="p-1 text-slate-500 hover:text-white transition-colors"><ChevronLeft size={16} /></button>
+            <span className="text-[10px] font-black text-emerald-400 uppercase bg-emerald-400/10 px-2 py-0.5 rounded-full min-w-[100px] text-center">
+              {monthName} {yearName}
+            </span>
+            <button onClick={nextMonth} className="p-1 text-slate-500 hover:text-white transition-colors"><ChevronRight size={16} /></button>
+          </div>
         </div>
         
         <div className="grid grid-cols-7 gap-1 text-center">
@@ -155,9 +209,11 @@ const Dashboard: React.FC<DashboardProps> = ({ workouts, onNavigate }) => {
             return (
               <div 
                 key={idx} 
+                onClick={() => handleDayClick(date)}
                 className={`aspect-square flex items-center justify-center text-[10px] font-bold rounded-xl transition-all relative
-                  ${hasTrained ? 'bg-emerald-500 text-slate-900 shadow-[0_0_10px_rgba(16,185,129,0.3)]' : 'text-slate-500 hover:bg-slate-700/50'}
-                  ${isToday && !hasTrained ? 'border border-emerald-500/50 text-emerald-400' : ''}
+                  ${hasTrained ? 'bg-emerald-500 text-slate-900 shadow-[0_0_10px_rgba(16,185,129,0.3)] cursor-pointer active:scale-90' : 'text-slate-500'}
+                  ${isToday ? 'ring-1 ring-emerald-500/50' : ''}
+                  ${!hasTrained && isToday ? 'text-emerald-400' : ''}
                 `}
               >
                 {date.getDate()}
@@ -170,7 +226,6 @@ const Dashboard: React.FC<DashboardProps> = ({ workouts, onNavigate }) => {
         </div>
       </div>
 
-      {/* Weekly Insight Section */}
       {weeklyInsight && (
         <div className="bg-slate-800/40 border border-slate-700/60 p-5 rounded-[1.5rem] animate-in fade-in slide-in-from-bottom-2 duration-500">
           <div className="flex items-center gap-2 mb-2">
@@ -199,7 +254,14 @@ const Dashboard: React.FC<DashboardProps> = ({ workouts, onNavigate }) => {
           <div className="bg-slate-800/80 border border-slate-700 rounded-[2rem] p-5 shadow-xl relative overflow-hidden">
             <div className="absolute top-0 right-0 p-4 flex items-center gap-2">
               {getTypeIcon(lastWorkout.type)}
-              <span className="bg-emerald-500/10 text-emerald-400 text-[8px] font-black px-2 py-0.5 rounded border border-emerald-500/20 uppercase tracking-tighter">Verified Session</span>
+              {hasAnyPR ? (
+                <div className={`flex items-center gap-1.5 bg-yellow-400/10 text-yellow-500 text-[8px] font-black px-2 py-0.5 rounded border border-yellow-500/20 uppercase tracking-tighter ${isNewPR ? 'animate-pr-delight' : ''}`}>
+                  <Trophy size={8} className="fill-current" />
+                  New Record
+                </div>
+              ) : (
+                <span className="bg-emerald-500/10 text-emerald-400 text-[8px] font-black px-2 py-0.5 rounded border border-emerald-500/20 uppercase tracking-tighter">Verified Session</span>
+              )}
             </div>
             <div className="flex justify-between items-start mb-4">
               <div>
@@ -213,7 +275,10 @@ const Dashboard: React.FC<DashboardProps> = ({ workouts, onNavigate }) => {
             <div className="space-y-3">
               {lastWorkout.exercises.slice(0, 3).map((ex, idx) => (
                 <div key={idx} className="flex justify-between items-center bg-slate-900/40 px-3 py-2 rounded-xl border border-slate-700/30">
-                  <span className="text-xs text-slate-300 font-bold uppercase tracking-tight">{ex.name}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-300 font-bold uppercase tracking-tight">{ex.name}</span>
+                    {ex.isPR && <Trophy size={10} className={`text-yellow-500 fill-current ${isNewPR ? 'animate-pr-delight' : ''}`} style={{ animationDelay: `${0.1 * idx}s` }} />}
+                  </div>
                   <span className="text-[10px] font-black text-emerald-400/80 bg-emerald-400/5 px-2 py-0.5 rounded border border-emerald-400/10">
                     {ex.sets.length} SETS
                   </span>

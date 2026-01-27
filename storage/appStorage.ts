@@ -1,18 +1,85 @@
 
-import { Workout, UserProfile, MUSCLE_GROUPS } from '../types';
+import { Workout, UserProfile, MUSCLE_GROUPS, Exercise, WorkoutTemplate, ExercisePR, WorkoutType } from '../types';
 
 export interface AppState {
   version: number;
+  backupType?: 'app' | 'profile'; // Identification for branching import logic
   updatedAt: string;
   profiles: UserProfile[];
   activeUserId: string | null;
   customCategories: string[];
   workouts: Workout[];
+  templates: WorkoutTemplate[];
+}
+
+export interface BackupSnapshot {
+  date: string;
+  workoutCount: number;
+  breakdown: Record<WorkoutType, number>;
+  data: AppState;
 }
 
 const STORAGE_KEY = 'gymTracker.appState';
 const BACKUP_KEY = 'gymTracker.backupState';
+const LAST_BACKUP_TIME_KEY = 'gymTracker.lastBackupAt';
+const LATEST_BACKUP_DATA_KEY = 'gymTracker.latestBackup';
 const CURRENT_VERSION = 2;
+
+/**
+ * Normalizes exercise names for consistent PR tracking
+ */
+export const normalizeExerciseName = (name: string): string => {
+  return name.trim().toLowerCase().replace(/\s+/g, ' ');
+};
+
+/**
+ * Normalizes a single workout object to ensure consistent data structure.
+ */
+export const normalizeWorkout = (w: any): Workout => {
+  const legacyExercises = w.exercises || w.items || w.movements || w.entries || w.workoutExercises || [];
+  const normalizedExercises: Exercise[] = Array.isArray(legacyExercises) ? legacyExercises : [];
+
+  return {
+    id: w.id || Math.random().toString(36).substr(2, 9),
+    userId: w.userId || '',
+    date: w.date || new Date().toISOString(),
+    title: w.title || 'Untitled Workout',
+    type: (w.type?.toLowerCase() as any) || 'strength',
+    quality: w.quality || 'normal',
+    exercises: normalizedExercises.map(ex => ({
+      ...ex,
+      id: ex.id || Math.random().toString(36).substr(2, 9),
+      name: ex.name || 'Untitled Exercise',
+      category: ex.category || 'General',
+      isPR: !!ex.isPR,
+      sets: Array.isArray(ex.sets) ? ex.sets.map(s => ({
+        ...s,
+        id: s.id || Math.random().toString(36).substr(2, 9),
+        completed: !!s.completed
+      })) : []
+    })),
+    notes: w.notes,
+    duration: w.duration
+  };
+};
+
+export const normalizeTemplate = (t: any): WorkoutTemplate => {
+  return {
+    id: t.id || Math.random().toString(36).substr(2, 9),
+    userId: t.userId || '',
+    title: t.title || 'Untitled Template',
+    type: (t.type?.toLowerCase() as any) || 'strength',
+    exercises: (t.exercises || []).map((ex: any) => ({
+      ...ex,
+      id: ex.id || Math.random().toString(36).substr(2, 9),
+      sets: (ex.sets || []).map((s: any) => ({
+        ...s,
+        id: s.id || Math.random().toString(36).substr(2, 9),
+        completed: false
+      }))
+    }))
+  };
+};
 
 export const createDefaultState = (): AppState => ({
   version: CURRENT_VERSION,
@@ -21,91 +88,49 @@ export const createDefaultState = (): AppState => ({
   activeUserId: null,
   customCategories: [...MUSCLE_GROUPS],
   workouts: [],
+  templates: [],
+  backupType: 'app'
 });
 
-/**
- * Migration helper to pull data from legacy separate keys
- */
-export const migrateFromLegacy = (): AppState | null => {
-  try {
-    const savedProfiles = localStorage.getItem('ironlog_profiles');
-    const savedActiveUserId = localStorage.getItem('ironlog_active_user');
-    const savedCategories = localStorage.getItem('ironlog_categories');
-    
-    if (!savedProfiles && !savedActiveUserId) return null;
-
-    const profiles = savedProfiles ? JSON.parse(savedProfiles) : [];
-    const activeUserId = savedActiveUserId || (profiles.length > 0 ? profiles[0].id : null);
-    const customCategories = savedCategories ? JSON.parse(savedCategories) : [...MUSCLE_GROUPS];
-    
-    const workouts: Workout[] = [];
-    profiles.forEach((p: UserProfile) => {
-      const ws = localStorage.getItem(`ironlog_workouts_${p.id}`);
-      if (ws) {
-        const parsedWs = JSON.parse(ws) as Workout[];
-        workouts.push(...parsedWs.map(w => ({ ...w, userId: p.id })));
-      }
-    });
-
-    return {
-      version: 1, // Legacy is considered version 1 once consolidated
-      updatedAt: new Date().toISOString(),
-      profiles,
-      activeUserId,
-      customCategories,
-      workouts,
-    };
-  } catch (e) {
-    console.error('Legacy migration failed', e);
-    return null;
-  }
-};
-
-/**
- * Applies sequential migrations to the state object
- */
 export const migrateState = (state: any): AppState => {
   let migratedState = { ...state };
   let version = migratedState.version || 0;
 
-  if (version === CURRENT_VERSION) return migratedState as AppState;
-
-  console.info(`Migrating app state from v${version} to v${CURRENT_VERSION}...`);
-
-  try {
-    // v0 -> v1: Wrap legacy keys if the state passed was essentially empty or missing version
-    if (version < 1) {
-      const legacy = migrateFromLegacy();
-      if (legacy) {
-        migratedState = { ...legacy };
-      } else if (!migratedState.profiles) {
-        migratedState = createDefaultState();
-        migratedState.version = 1;
-      }
-      version = 1;
+  if (version === CURRENT_VERSION) {
+    if (Array.isArray(migratedState.workouts)) {
+      migratedState.workouts = migratedState.workouts.map(normalizeWorkout);
+    } else {
+      migratedState.workouts = [];
+    }
+    
+    if (Array.isArray(migratedState.templates)) {
+      migratedState.templates = migratedState.templates.map(normalizeTemplate);
+    } else {
+      migratedState.templates = [];
     }
 
-    // v1 -> v2: Placeholder migration
-    if (version < 2) {
-      if (!migratedState.customCategories || migratedState.customCategories.length === 0) {
-        migratedState.customCategories = [...MUSCLE_GROUPS];
-      }
-      migratedState.version = 2;
-      version = 2;
+    if (Array.isArray(migratedState.profiles)) {
+      migratedState.profiles = migratedState.profiles.map((p: any) => ({
+        ...p,
+        prs: p.prs || {}
+      }));
+    } else {
+      migratedState.profiles = [];
     }
-
-    migratedState.updatedAt = new Date().toISOString();
     return migratedState as AppState;
+  }
 
-  } catch (error) {
-    console.error('Migration failed critically. Resetting to default state to prevent crash.', error);
+  // Fallback for very old versions or missing structures
+  if (!migratedState.profiles) {
     return createDefaultState();
   }
+
+  migratedState.version = CURRENT_VERSION;
+  migratedState.updatedAt = new Date().toISOString();
+  migratedState.backupType = 'app';
+  return migratedState as AppState;
 };
 
-/**
- * Loads state with automatic backup recovery
- */
 export const loadState = (): { state: AppState, recovered: boolean } => {
   let recovered = false;
   
@@ -113,7 +138,6 @@ export const loadState = (): { state: AppState, recovered: boolean } => {
     if (!json) return null;
     try {
       const parsed = JSON.parse(json);
-      // Minimal structural validation
       if (typeof parsed !== 'object' || parsed === null) return null;
       return parsed;
     } catch (e) {
@@ -124,35 +148,20 @@ export const loadState = (): { state: AppState, recovered: boolean } => {
   const raw = localStorage.getItem(STORAGE_KEY);
   let parsed = tryParse(raw);
 
-  // If primary load fails, try recovery from backup
   if (!parsed) {
     const backupRaw = localStorage.getItem(BACKUP_KEY);
     parsed = tryParse(backupRaw);
-    if (parsed) {
-      recovered = true;
-      console.warn('Primary state corrupted. Successfully recovered from backupState.');
-    }
+    if (parsed) recovered = true;
   }
 
-  // If primary and backup fail, try legacy migration or default
-  if (!parsed) {
-    const legacy = migrateFromLegacy();
-    if (legacy) {
-      return { state: migrateState(legacy), recovered: false };
-    }
-    return { state: createDefaultState(), recovered: false };
-  }
+  if (!parsed) return { state: createDefaultState(), recovered: false };
 
   const migrated = migrateState(parsed);
   return { state: migrated, recovered };
 };
 
-/**
- * Saves state after creating a backup of the existing state
- */
 export const saveState = (state: AppState): void => {
   try {
-    // Rotate current state to backup before saving new state
     const currentStateRaw = localStorage.getItem(STORAGE_KEY);
     if (currentStateRaw) {
       localStorage.setItem(BACKUP_KEY, currentStateRaw);
@@ -160,6 +169,7 @@ export const saveState = (state: AppState): void => {
 
     const payload: AppState = {
       ...state,
+      backupType: 'app',
       updatedAt: new Date().toISOString(),
       version: CURRENT_VERSION,
     };
@@ -167,4 +177,66 @@ export const saveState = (state: AppState): void => {
   } catch (error) {
     console.error('Failed to save app state:', error);
   }
+};
+
+/**
+ * Backup Logic
+ */
+export const checkIsBackupDue = (): boolean => {
+  const lastBackupStr = localStorage.getItem(LAST_BACKUP_TIME_KEY);
+  if (!lastBackupStr) return true;
+  
+  const lastBackup = new Date(lastBackupStr).getTime();
+  const now = Date.now();
+  const weekInMs = 7 * 24 * 60 * 60 * 1000;
+  
+  return (now - lastBackup) > weekInMs;
+};
+
+export const createBackupSnapshot = (state: AppState): BackupSnapshot => {
+  const breakdown: Record<WorkoutType, number> = { strength: 0, cardio: 0, mobility: 0 };
+  state.workouts.forEach(w => {
+    if (breakdown[w.type] !== undefined) breakdown[w.type]++;
+  });
+
+  const snapshot: BackupSnapshot = {
+    date: new Date().toISOString(),
+    workoutCount: state.workouts.length,
+    breakdown,
+    data: {
+      ...state,
+      backupType: 'app', // Explicitly marking as app-wide backup
+      updatedAt: new Date().toISOString()
+    }
+  };
+
+  localStorage.setItem(LATEST_BACKUP_DATA_KEY, JSON.stringify(snapshot));
+  localStorage.setItem(LAST_BACKUP_TIME_KEY, snapshot.date);
+  
+  return snapshot;
+};
+
+export const getLatestBackup = (): BackupSnapshot | null => {
+  const raw = localStorage.getItem(LATEST_BACKUP_DATA_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Global Export/Download Utility
+ */
+export const downloadAppStateAsJSON = (state: any, fileName: string) => {
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 };
