@@ -3,23 +3,30 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { Workout } from "../types";
 
 /**
+ * Safely retrieves environment variables from various possible sources.
+ */
+const getEnvVar = (key: string): string => {
+  const env = (typeof process !== 'undefined' ? process.env : {}) as any;
+  const meta = (import.meta as any)?.env || {};
+  const value = env[key] || meta[key] || '';
+  return typeof value === 'string' ? value.trim() : '';
+};
+
+/**
  * Helper to check if AI is configured.
- * Per guidelines, the API key must be obtained exclusively from process.env.API_KEY.
  */
 export const isAIConfigured = () => {
-  return !!process.env.API_KEY;
+  return !!getEnvVar('API_KEY');
 };
 
 const CONFIG_ERROR_MSG = "AI is not configured. Please set the API_KEY environment variable to enable coaching features.";
 
 export const getWorkoutFeedback = async (history: Workout[]) => {
-  // Obtain API key exclusively from process.env.API_KEY as mandated by guidelines.
-  const apiKey = process.env.API_KEY;
+  const apiKey = getEnvVar('API_KEY');
   if (!apiKey) {
     return CONFIG_ERROR_MSG;
   }
 
-  // Create a new GoogleGenAI instance right before making an API call to ensure use of the most up-to-date configuration.
   const ai = new GoogleGenAI({ apiKey });
 
   try {
@@ -58,13 +65,11 @@ export const getWorkoutFeedback = async (history: Workout[]) => {
 };
 
 export const generatePlan = async (goal: string) => {
-  // Obtain API key exclusively from process.env.API_KEY as mandated by guidelines.
-  const apiKey = process.env.API_KEY;
+  const apiKey = getEnvVar('API_KEY');
   if (!apiKey) {
     return { error: CONFIG_ERROR_MSG };
   }
 
-  // Create a new GoogleGenAI instance right before making an API call to ensure use of the most up-to-date configuration.
   const ai = new GoogleGenAI({ apiKey });
 
   try {
