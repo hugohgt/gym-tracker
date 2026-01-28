@@ -1,7 +1,7 @@
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { LayoutDashboard, History, PlusCircle, BarChart3, User, Share, X, Timer as TimerIcon, CheckCircle2, AlertTriangle, Layers, Trophy, ShieldCheck, Download, LogOut, Cloud, Settings, RefreshCw, Loader2, Database } from 'lucide-react';
-import { Workout, ViewType, UserProfile, MUSCLE_GROUPS, WorkoutTemplate, ExercisePR, Exercise } from './types';
+import React, { useState, useEffect, useMemo } from 'react';
+import { LayoutDashboard, History, PlusCircle, BarChart3, User, X, Timer as TimerIcon, CheckCircle2, AlertTriangle, LogOut, Cloud, RefreshCw, Loader2, Database } from 'lucide-react';
+import { Workout, ViewType, UserProfile, MUSCLE_GROUPS, WorkoutTemplate } from './types';
 import Dashboard from './components/Dashboard';
 import HistoryView from './components/HistoryView';
 import WorkoutLogger from './components/WorkoutLogger';
@@ -13,110 +13,123 @@ import { AuthScreen } from './components/AuthScreen';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
 import { normalizeWorkout, normalizeTemplate, loadState } from './storage/appStorage';
 
-const IOS_PROMPT_KEY = 'gym-tracker:ios-prompt-dismissed';
-
-interface ToastState {
-  message: string;
-  type: 'success' | 'error';
-  id: number;
-}
-
 const App: React.FC = () => {
   const [session, setSession] = useState<any>(null);
   const [activeView, setActiveView] = useState<ViewType>('dashboard');
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [templates, setTemplates] = useState<WorkoutTemplate[]>([]);
-  const [profiles, setProfiles] = useState<UserProfile[]>([]);
-  const [activeUserId, setActiveUserId] = useState<string | null>(null);
+  const [activeProfile, setActiveProfile] = useState<UserProfile | null>(null);
   const [customCategories, setCustomCategories] = useState<string[]>([]);
   const [isInitialized, setIsInitialized] = useState(false);
   const [initializationError, setInitializationError] = useState<string | null>(null);
-  const [toast, setToastInternal] = useState<ToastState | null>(null);
+  const [toast, setToastInternal] = useState<{message: string, type: 'success'|'error', id: number} | null>(null);
   const [historyDateFilter, setHistoryDateFilter] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
 
-  const setToast = (t: Omit<ToastState, 'id'> | null) => {
-    if (!t) {
-      setToastInternal(null);
-      return;
-    }
+  const setToast = (t: {message: string, type: 'success' | 'error'} | null) => {
+    if (!t) { setToastInternal(null); return; }
     setToastInternal({ ...t, id: Date.now() });
     setTimeout(() => setToastInternal(null), 3000);
   };
 
-  // 1. Auth Listener
+  // 1. Unified Auth & State Management
   useEffect(() => {
     if (!supabase) {
       setIsInitialized(true);
       return;
     }
-    
+
+    // Initial session check
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      if (!session) setIsInitialized(true); 
+      if (!session) setIsInitialized(true);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, newSession) => {
+      setSession(newSession);
+      
+      if (event === 'SIGNED_OUT') {
+        // Clear all user data on logout
+        setWorkouts([]);
+        setTemplates([]);
+        setActiveProfile(null);
+        setInitializationError(null);
+        setActiveView('dashboard');
+        setIsInitialized(true);
+      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        setInitializationError(null);
+      }
     });
-    
+
     return () => subscription.unsubscribe();
   }, []);
 
-  // 2. Data Fetching / Initialization
+  // 2. Automated Profile Onboarding & Sync
   useEffect(() => {
     if (!session) {
-      const { state } = loadState();
-      setWorkouts(state.workouts || []);
-      setProfiles(state.profiles || []);
-      setTemplates(state.templates || []);
-      if (state.profiles?.length > 0) setActiveUserId(state.activeUserId);
-      setCustomCategories(state.customCategories || [...MUSCLE_GROUPS]);
-      setIsInitialized(true);
+      // Local fallback logic if not configured/logged in
+      if (!isSupabaseConfigured) {
+        const { state } = loadState();
+        setWorkouts(state.workouts || []);
+        setTemplates(state.templates || []);
+        setCustomCategories(state.customCategories || [...MUSCLE_GROUPS]);
+        setIsInitialized(true);
+      }
       return;
     }
 
-    const fetchAllData = async () => {
+    const syncAccount = async () => {
       if (!supabase) return;
       setIsSyncing(true);
-      setInitializationError(null);
       try {
-        // Fetch using Spanish table names: usuarios, entrenos
-        const [{ data: pData, error: pError }, { data: wData, error: wError }, { data: tData }] = await Promise.all([
-          supabase.from('usuarios').select('*').eq('user_id', session.user.id).order('last_used_at', { ascending: false }),
-          supabase.from('entrenos').select('*').eq('usuario_id', session.user.id).order('fecha', { ascending: false }),
-          supabase.from('templates').select('*').eq('user_id', session.user.id)
-        ]);
+        // Fetch the profile for this account (Strict RLS: usuario_id = auth.uid())
+        let { data: pData, error: pError } = await supabase
+          .from('usuarios')
+          .select('*')
+          .eq('usuario_id', session.user.id)
+          .maybeSingle();
 
-        // Error detection for missing tables
-        if (wError?.code === 'PGRST116' || wError?.message?.includes('not found')) {
-          setInitializationError('Table "entrenos" not found. Please check your Supabase schema.');
-          setIsInitialized(true);
-          return;
+        if (pError) throw pError;
+
+        // BOOTSTRAP: Auto-create profile if missing
+        if (!pData) {
+          const defaultName = session.user.email?.split('@')[0] || 'Trainer';
+          const { data: created, error: createError } = await supabase
+            .from('usuarios')
+            .insert([{
+              id: Math.random().toString(36).substr(2, 9),
+              usuario_id: session.user.id,
+              name: defaultName.charAt(0).toUpperCase() + defaultName.slice(1),
+              color: '#10b981',
+              last_used_at: new Date().toISOString()
+            }])
+            .select()
+            .single();
+          
+          if (createError) throw createError;
+          pData = created;
         }
 
-        if (pError?.code === 'PGRST116' || pError?.message?.includes('not found')) {
-          setInitializationError('Table "usuarios" not found. Please check your Supabase schema.');
-          setIsInitialized(true);
-          return;
-        }
+        const profile: UserProfile = { ...pData, user_id: pData.usuario_id };
+        setActiveProfile(profile);
 
-        const mappedProfiles = pData || [];
-        setProfiles(mappedProfiles);
-        
-        // Map Spanish columns back to internal Workout type
+        // Fetch user's workouts
+        const { data: wData, error: wError } = await supabase
+          .from('entrenos')
+          .select('*')
+          .eq('usuario_id', session.user.id)
+          .order('fecha', { ascending: false });
+
+        if (wError) throw wError;
+
         const mappedWorkouts: Workout[] = (wData || []).map(raw => {
           let obs: any = {};
-          try {
-            obs = JSON.parse(raw.observaciones || '{}');
-          } catch (e) {
-            obs = { notes: raw.observaciones };
-          }
-
+          try { obs = JSON.parse(raw.observaciones || '{}'); } catch { obs = { notes: raw.observaciones }; }
           return {
             id: raw.entreno_id,
             user_id: raw.usuario_id,
-            profile_id: obs.profile_id || '', // Use the profile stored in JSON
+            profile_id: profile.id, 
             date: raw.fecha,
             title: raw.nombre_rutina,
             duration: raw.duracion_minutos,
@@ -128,169 +141,136 @@ const App: React.FC = () => {
         });
 
         setWorkouts(mappedWorkouts);
-        setTemplates(tData || []);
-        
-        if (mappedProfiles.length > 0 && !activeUserId) {
-          setActiveUserId(mappedProfiles[0].id);
-        }
-
         setCustomCategories([...MUSCLE_GROUPS]);
         setIsInitialized(true);
       } catch (err: any) {
-        console.error("Cloud Sync Error:", err.message);
-        setInitializationError("Failed to connect to Supabase.");
+        console.error("Account Sync Error:", err.message);
+        setInitializationError(err.message.includes('not found') ? "Cloud tables not detected. Check schema." : "Sync failed.");
         setIsInitialized(true);
       } finally {
         setIsSyncing(false);
       }
     };
 
-    fetchAllData();
+    syncAccount();
   }, [session]);
 
-  const activeUserWorkouts = useMemo(() => {
-    if (!activeUserId) return [];
-    // Filter by profile_id stored in our JSON blob (now part of normalized Workout object)
-    return workouts
-      .filter(w => w.profile_id === activeUserId)
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [workouts, activeUserId]);
-
-  const handleNavigate = (view: ViewType, data?: any) => {
-    if (view === 'history') setHistoryDateFilter(data || null);
-    else setHistoryDateFilter(null);
-    setActiveView(view);
-  };
-
   const addWorkout = async (newWorkout: Omit<Workout, 'userId' | 'user_id' | 'profile_id'>) => {
-    if (!activeUserId || !session) {
-      setToast({ message: "Auth required for cloud", type: 'error' });
+    // FRESH SESSION CHECK: Prevent stale closure errors
+    let currentSession = session;
+    if (!currentSession && supabase) {
+      const { data } = await supabase.auth.getSession();
+      currentSession = data.session;
+    }
+
+    if (!currentSession || !activeProfile) {
+      setToast({ message: "Please sign in to save", type: 'error' });
+      setActiveView('dashboard');
       return;
     }
 
-    const workoutId = Date.now().toString();
+    const workoutId = Math.random().toString(36).substr(2, 9);
     const workoutToSave: Workout = { 
       ...newWorkout, 
       id: workoutId, 
-      profile_id: activeUserId,
-      user_id: session.user.id 
+      profile_id: activeProfile.id,
+      user_id: currentSession.user.id 
     };
 
-    if (supabase && session) {
-      setIsSyncing(true);
-      try {
-        // Map internal Workout type to Spanish schema
-        const payload = {
-          entreno_id: workoutId,
-          usuario_id: session.user.id, // Mandatory as requested
-          nombre_rutina: workoutToSave.title,
-          fecha: workoutToSave.date,
-          duracion_minutos: workoutToSave.duration || 0,
-          observaciones: JSON.stringify({
-            exercises: workoutToSave.exercises,
-            type: workoutToSave.type,
-            quality: workoutToSave.quality,
-            notes: workoutToSave.notes,
-            profile_id: activeUserId // Key to keep profile data separate in entrenos
-          })
-        };
+    setIsSyncing(true);
+    try {
+      const payload = {
+        entreno_id: workoutId,
+        usuario_id: currentSession.user.id,
+        nombre_rutina: workoutToSave.title,
+        fecha: workoutToSave.date,
+        duracion_minutos: workoutToSave.duration || 0,
+        observaciones: JSON.stringify({
+          exercises: workoutToSave.exercises,
+          type: workoutToSave.type,
+          quality: workoutToSave.quality,
+          notes: workoutToSave.notes,
+          profile_id: activeProfile.id 
+        })
+      };
 
-        const { error } = await supabase.from('entrenos').insert([payload]);
-
-        if (error) throw error;
-        setWorkouts([workoutToSave, ...workouts]);
-        setToast({ message: "Synced to entrenos", type: 'success' });
-      } catch (err: any) {
-        console.error("Save error:", err);
-        setToast({ message: "Cloud error, saving locally", type: 'error' });
-        setWorkouts([normalizeWorkout(workoutToSave), ...workouts]);
-      } finally {
-        setIsSyncing(false);
-      }
-    } else {
-      setWorkouts([normalizeWorkout(workoutToSave), ...workouts]);
-      setToast({ message: "Saved locally", type: 'success' });
+      const { error } = await supabase!.from('entrenos').insert([payload]);
+      if (error) throw error;
+      
+      setWorkouts([workoutToSave, ...workouts]);
+      setToast({ message: "Workout saved", type: 'success' });
+    } catch (err: any) {
+      setToast({ message: "Save failed - RLS or Network error", type: 'error' });
+      // Don't save locally if auth failed to keep data integrity
+    } finally {
+      setIsSyncing(false);
     }
     setActiveView('dashboard');
   };
 
   const deleteWorkout = async (id: string) => {
-    if (supabase && session) {
-      setIsSyncing(true);
-      try {
-        const { error } = await supabase.from('entrenos').delete().eq('entreno_id', id);
-        if (error) throw error;
-        setWorkouts(workouts.filter(w => w.id !== id));
-        setToast({ message: "Workout deleted", type: 'success' });
-      } catch (err) {
-        setToast({ message: "Cloud delete failed", type: 'error' });
-      } finally {
-        setIsSyncing(false);
-      }
-    } else {
+    if (!supabase || !session) return;
+    setIsSyncing(true);
+    try {
+      const { error } = await supabase.from('entrenos').delete().eq('entreno_id', id);
+      if (error) throw error;
       setWorkouts(workouts.filter(w => w.id !== id));
-      setToast({ message: "Deleted locally", type: 'success' });
+      setToast({ message: "Entry removed", type: 'success' });
+    } catch {
+      setToast({ message: "Delete failed", type: 'error' });
+    } finally {
+      setIsSyncing(false);
     }
   };
 
-  const handleUpdateProfiles = async (updatedProfiles: UserProfile[], nextId: string | null) => {
-    setProfiles(updatedProfiles);
-    setActiveUserId(nextId);
-
+  const handleUpdateProfile = async (updated: UserProfile) => {
+    setActiveProfile(updated);
     if (supabase && session) {
       try {
-        for (const profile of updatedProfiles) {
-          // Upsert to "usuarios" table
-          await supabase.from('usuarios').upsert({
-            id: profile.id,
-            user_id: session.user.id,
-            name: profile.name,
-            color: profile.color,
-            last_used_at: new Date().toISOString()
-          });
-        }
-      } catch (err) {
-        console.error("Profile sync error", err);
-      }
+        await supabase.from('usuarios').upsert({
+          id: updated.id,
+          usuario_id: session.user.id,
+          name: updated.name,
+          color: updated.color,
+          last_used_at: new Date().toISOString()
+        });
+        setToast({ message: "Profile updated", type: 'success' });
+      } catch (err) { console.error("Update error", err); }
     }
   };
 
   const handleLogout = async () => {
-    if (supabase) await supabase.auth.signOut();
-    setSession(null);
-    window.location.reload();
+    if (supabase) {
+      await supabase.auth.signOut();
+      // Logic inside useEffect(onAuthStateChange) will handle state cleanup
+    }
   };
 
-  if (isSupabaseConfigured && !session && activeView !== 'profiles') {
-     return <AuthScreen />;
+  // 3. Conditional Rendering based on Auth
+  if (isSupabaseConfigured && !session && isInitialized) {
+    return <AuthScreen />;
   }
 
   return (
     <div className="flex flex-col min-h-screen max-w-md mx-auto bg-slate-900 overflow-x-hidden font-sans">
       <header className="pt-8 pb-4 px-6 bg-slate-900/80 backdrop-blur-md border-b border-slate-800 flex justify-between items-center sticky top-0 z-10">
         <div>
-          <h1 className="text-2xl font-black bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent uppercase tracking-tighter">
-            GYM TRACKER
-          </h1>
+          <h1 className="text-2xl font-black bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent uppercase tracking-tighter">GYM TRACKER</h1>
           <div className="flex items-center gap-1.5 mt-0.5">
-            {isSyncing ? (
-              <RefreshCw size={10} className="text-emerald-400 animate-spin" />
-            ) : (
-              <Cloud size={10} className={isSupabaseConfigured ? "text-emerald-500" : "text-slate-600"} />
-            )}
-            <p className="text-[8px] text-slate-500 font-bold uppercase tracking-[0.2em]">
-              {isSyncing ? 'Syncing...' : isSupabaseConfigured ? 'Cloud Connected' : 'Local Only'}
-            </p>
+            {isSyncing ? <RefreshCw size={10} className="text-emerald-400 animate-spin" /> : <Cloud size={10} className="text-emerald-500" />}
+            <p className="text-[8px] text-slate-500 font-bold uppercase tracking-[0.2em]">{isSyncing ? 'Syncing...' : 'Account Secure'}</p>
           </div>
         </div>
         <div className="flex items-center gap-3">
           {session && (
-            <button onClick={handleLogout} className="p-2.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-400 active:scale-95 transition-all">
-              <LogOut size={16} />
-            </button>
+            <button onClick={handleLogout} className="p-2.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-400 active:scale-95 transition-all"><LogOut size={16} /></button>
           )}
-          <button onClick={() => handleNavigate('profiles')} className="w-10 h-10 rounded-full bg-slate-800 border-2 border-slate-700 flex items-center justify-center overflow-hidden transition-transform active:scale-95 shadow-lg">
-            {profiles.find(p => p.id === activeUserId)?.name.charAt(0) || <User size={18} />}
+          <button onClick={() => setActiveView('profiles')} className="w-10 h-10 rounded-full bg-slate-800 border-2 border-slate-700 flex items-center justify-center overflow-hidden transition-transform active:scale-95 shadow-lg">
+            {activeProfile ? (
+              <div className="w-full h-full flex items-center justify-center font-black text-white" style={{ backgroundColor: activeProfile.color }}>
+                {activeProfile.name.charAt(0)}
+              </div>
+            ) : <User size={18} />}
           </button>
         </div>
       </header>
@@ -299,55 +279,43 @@ const App: React.FC = () => {
         {!isInitialized ? (
           <div className="flex flex-col items-center justify-center py-20 gap-4">
             <Loader2 className="text-emerald-500 animate-spin" size={32} />
-            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Warming up...</p>
+            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Verifying Session...</p>
           </div>
         ) : initializationError ? (
-          <div className="flex flex-col items-center justify-center py-20 gap-6 text-center animate-in fade-in slide-in-from-top-4">
-            <div className="w-16 h-16 rounded-3xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-500">
-              <Database size={32} />
-            </div>
+          <div className="flex flex-col items-center justify-center py-20 gap-6 text-center">
+            <div className="w-16 h-16 rounded-3xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-500"><Database size={32} /></div>
             <div>
-              <h2 className="text-lg font-black text-white uppercase tracking-tight">Table not found</h2>
-              <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mt-2 px-8 leading-relaxed">
-                {initializationError}
-              </p>
+              <h2 className="text-lg font-black text-white uppercase tracking-tight">Sync Failure</h2>
+              <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mt-2 px-8 leading-relaxed">{initializationError}</p>
             </div>
-            <button 
-              onClick={() => window.location.reload()}
-              className="px-6 py-3 bg-slate-800 border border-slate-700 rounded-2xl text-[10px] font-black text-white uppercase tracking-widest flex items-center gap-2 active:scale-95 transition-all"
-            >
-              <RefreshCw size={14} /> Retry Connection
-            </button>
+            <button onClick={() => window.location.reload()} className="px-6 py-3 bg-slate-800 border border-slate-700 rounded-2xl text-[10px] font-black text-white uppercase tracking-widest flex items-center gap-2 active:scale-95 transition-all"><RefreshCw size={14} /> Retry Sync</button>
           </div>
         ) : (
           <>
-            {activeView === 'dashboard' && <Dashboard workouts={activeUserWorkouts} onNavigate={handleNavigate} />}
-            {activeView === 'history' && <HistoryView workouts={activeUserWorkouts} onDelete={deleteWorkout} dateFilter={historyDateFilter} onClearFilter={() => setHistoryDateFilter(null)} />}
+            {activeView === 'dashboard' && <Dashboard workouts={workouts} onNavigate={(v, d) => { if(v === 'history') setHistoryDateFilter(d); setActiveView(v); }} />}
+            {activeView === 'history' && <HistoryView workouts={workouts} onDelete={deleteWorkout} dateFilter={historyDateFilter} onClearFilter={() => setHistoryDateFilter(null)} />}
             {activeView === 'log' && (
               <WorkoutLogger 
                 onSave={addWorkout}
-                onSaveTemplate={(t) => setTemplates([...templates, normalizeTemplate({...t, user_id: session?.user?.id || 'local'})])}
+                onSaveTemplate={(t) => setTemplates([...templates, normalizeTemplate({...t, user_id: session?.user?.id})])}
                 onCancel={() => setActiveView('dashboard')} 
-                previousWorkouts={activeUserWorkouts}
+                previousWorkouts={workouts}
                 templates={templates}
                 availableCategories={customCategories}
                 onAddCategory={(cat) => setCustomCategories([...customCategories, cat])}
                 onToast={setToast}
               />
             )}
-            {activeView === 'stats' && <Analytics workouts={activeUserWorkouts} />}
+            {activeView === 'stats' && <Analytics workouts={workouts} />}
             {activeView === 'timer' && <TimerView />}
-            {activeView === 'ai' && <AICoach workouts={activeUserWorkouts} />}
-            {activeView === 'profiles' && (
+            {activeView === 'ai' && <AICoach workouts={workouts} />}
+            {activeView === 'profiles' && activeProfile && (
               <ProfileSwitcher 
-                profiles={profiles} 
+                profile={activeProfile}
                 workouts={workouts}
                 templates={templates}
-                activeUserId={activeUserId} 
-                currentAuthUserId={session?.user?.id || 'local'}
-                onUpdate={handleUpdateProfiles} 
                 customCategories={customCategories}
-                onImportAll={() => {}}
+                onUpdate={handleUpdateProfile} 
                 onClose={() => setActiveView('dashboard')}
                 onToast={setToast}
               />
@@ -357,13 +325,13 @@ const App: React.FC = () => {
       </main>
 
       <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-slate-900/95 backdrop-blur-lg border-t border-slate-800 flex justify-around items-center px-4 py-4 safe-bottom z-50">
-        <NavButton active={activeView === 'dashboard'} icon={<LayoutDashboard size={24} />} label="Home" onClick={() => handleNavigate('dashboard')} />
-        <NavButton active={activeView === 'history'} icon={<History size={24} />} label="Log" onClick={() => handleNavigate('history')} />
+        <NavButton active={activeView === 'dashboard'} icon={<LayoutDashboard size={24} />} label="Home" onClick={() => setActiveView('dashboard')} />
+        <NavButton active={activeView === 'history'} icon={<History size={24} />} label="Log" onClick={() => setActiveView('history')} />
         <div className="relative -top-6">
-          <button onClick={() => handleNavigate('log')} className="w-16 h-16 rounded-full bg-gradient-to-tr from-emerald-500 to-cyan-500 shadow-lg shadow-emerald-500/20 flex items-center justify-center text-white border-4 border-slate-900 active:scale-95 transition-transform"><PlusCircle size={32} /></button>
+          <button onClick={() => setActiveView('log')} className="w-16 h-16 rounded-full bg-gradient-to-tr from-emerald-500 to-cyan-500 shadow-lg shadow-emerald-500/20 flex items-center justify-center text-white border-4 border-slate-900 active:scale-95 transition-transform"><PlusCircle size={32} /></button>
         </div>
-        <NavButton active={activeView === 'timer'} icon={<TimerIcon size={24} />} label="Timer" onClick={() => handleNavigate('timer')} />
-        <NavButton active={activeView === 'stats'} icon={<BarChart3 size={24} />} label="Stats" onClick={() => handleNavigate('stats')} />
+        <NavButton active={activeView === 'timer'} icon={<TimerIcon size={24} />} label="Timer" onClick={() => setActiveView('timer')} />
+        <NavButton active={activeView === 'stats'} icon={<BarChart3 size={24} />} label="Stats" onClick={() => setActiveView('stats')} />
       </nav>
 
       {toast && (
