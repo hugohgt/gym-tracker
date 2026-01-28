@@ -74,22 +74,25 @@ const App: React.FC = () => {
         // Migration logic: Rename client_id to usuario_id if present (client_id is removed from schema)
         const workoutUserId = item.usuario_id || item.user_id || session.user.id;
 
+        const fullData = {
+          exercises: item.exercises,
+          type: item.type,
+          quality: item.quality,
+          notes: item.notes,
+          profile_id: item.profile_id
+        };
+
         const payload = {
           entreno_id: item.id,
           usuario_id: workoutUserId,
           nombre_rutina: item.title,
           fecha: item.date,
           duracion_minutos: item.duration || 0,
-          payload: {
-            exercises: item.exercises,
-            type: item.type,
-            quality: item.quality,
-            notes: item.notes,
-            profile_id: item.profile_id
-          },
-          observaciones: item.notes || null
+          payload: fullData,
+          observaciones: fullData // Ensure observaciones contains the full JSON object
         };
 
+        console.log("Syncing pending workout payload:", payload);
         const { error } = await supabase.from('entrenos').insert([payload]);
         // If success or duplicate key, remove from local queue
         if (!error || error.code === '23505') {
@@ -123,7 +126,7 @@ const App: React.FC = () => {
             exercises: extra.exercises || [],
             type: extra.type || 'strength',
             quality: extra.quality || 'normal',
-            notes: extra.notes || raw.observaciones || ''
+            notes: extra.notes || raw.observaciones?.notes || ''
           };
         }));
       }
@@ -168,7 +171,7 @@ const App: React.FC = () => {
 
         const { data: wData } = await supabase.from('entrenos').select('*').eq('usuario_id', session.user.id).order('fecha', { ascending: false });
         setWorkouts((wData || []).map(raw => {
-          const extra = raw.payload || {};
+          const extra = raw.payload || raw.observaciones || {};
           return {
             id: raw.entreno_id,
             user_id: raw.usuario_id,
@@ -179,7 +182,7 @@ const App: React.FC = () => {
             exercises: extra.exercises || [],
             type: extra.type || 'strength',
             quality: extra.quality || 'normal',
-            notes: extra.notes || raw.observaciones || ''
+            notes: extra.notes || ''
           };
         }));
         setCustomCategories([...MUSCLE_GROUPS]);
@@ -207,28 +210,26 @@ const App: React.FC = () => {
       user_id: session.user.id 
     };
 
+    const fullData = {
+      exercises: workoutToSave.exercises,
+      type: workoutToSave.type,
+      quality: workoutToSave.quality,
+      notes: workoutToSave.notes,
+      profile_id: activeProfile.id 
+    };
+
     const dbPayload = {
       entreno_id: workoutId,
       usuario_id: session.user.id,
       nombre_rutina: workoutToSave.title,
       fecha: workoutToSave.date,
       duracion_minutos: workoutToSave.duration || 0,
-      payload: {
-        exercises: workoutToSave.exercises,
-        type: workoutToSave.type,
-        quality: workoutToSave.quality,
-        notes: workoutToSave.notes,
-        profile_id: activeProfile.id 
-      },
-      observaciones: workoutToSave.notes || null
+      payload: fullData,
+      observaciones: fullData // Ensure observaciones is the JSON object
     };
 
     setIsSyncing(true);
-    console.log("Saving workout to Supabase...", { 
-      online: navigator.onLine, 
-      usuario_id: session.user.id,
-      entreno_id: workoutId 
-    });
+    console.log("Saving workout to Supabase. Request Body:", dbPayload);
 
     try {
       const { error } = await supabase!.from('entrenos').insert([dbPayload]);
