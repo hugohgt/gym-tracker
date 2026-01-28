@@ -11,7 +11,7 @@ import TimerView from './components/TimerView';
 import ProfileSwitcher from './components/ProfileSwitcher';
 import { AuthScreen } from './components/AuthScreen';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
-import { normalizeWorkout, normalizeTemplate, loadState } from './storage/appStorage';
+import { normalizeWorkout, normalizeTemplate } from './storage/appStorage';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<any>(null);
@@ -32,58 +32,46 @@ const App: React.FC = () => {
     setTimeout(() => setToastInternal(null), 3000);
   };
 
-  // 1. Unified Auth & State Management
+  // 1. Unified Auth Listener (Source of Truth)
   useEffect(() => {
     if (!supabase) {
       setIsInitialized(true);
       return;
     }
 
-    // Initial session check
+    // Initial check
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (!session) setIsInitialized(true);
     });
 
-    // Listen for auth changes
+    // Listen for events
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, newSession) => {
       setSession(newSession);
       
       if (event === 'SIGNED_OUT') {
-        // Clear all user data on logout
+        // Full state reset on logout to prevent "Broken Screen" or stale data
         setWorkouts([]);
         setTemplates([]);
         setActiveProfile(null);
         setInitializationError(null);
         setActiveView('dashboard');
         setIsInitialized(true);
-      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-        setInitializationError(null);
       }
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
-  // 2. Automated Profile Onboarding & Sync
+  // 2. Data Synchronization & Profile Bootstrapping
   useEffect(() => {
-    if (!session) {
-      // Local fallback logic if not configured/logged in
-      if (!isSupabaseConfigured) {
-        const { state } = loadState();
-        setWorkouts(state.workouts || []);
-        setTemplates(state.templates || []);
-        setCustomCategories(state.customCategories || [...MUSCLE_GROUPS]);
-        setIsInitialized(true);
-      }
-      return;
-    }
+    if (!session) return;
 
     const syncAccount = async () => {
       if (!supabase) return;
       setIsSyncing(true);
       try {
-        // Fetch the profile for this account (Strict RLS: usuario_id = auth.uid())
+        // Fetch profile (Linked via RLS: usuario_id = auth.uid())
         let { data: pData, error: pError } = await supabase
           .from('usuarios')
           .select('*')
@@ -92,15 +80,14 @@ const App: React.FC = () => {
 
         if (pError) throw pError;
 
-        // BOOTSTRAP: Auto-create profile if missing
+        // BOOTSTRAP: Automate profile creation for new users
         if (!pData) {
-          const defaultName = session.user.email?.split('@')[0] || 'Trainer';
+          const emailName = session.user.email?.split('@')[0] || 'User';
           const { data: created, error: createError } = await supabase
             .from('usuarios')
             .insert([{
-              id: Math.random().toString(36).substr(2, 9),
               usuario_id: session.user.id,
-              name: defaultName.charAt(0).toUpperCase() + defaultName.slice(1),
+              name: emailName.charAt(0).toUpperCase() + emailName.slice(1),
               color: '#10b981',
               last_used_at: new Date().toISOString()
             }])
@@ -114,7 +101,7 @@ const App: React.FC = () => {
         const profile: UserProfile = { ...pData, user_id: pData.usuario_id };
         setActiveProfile(profile);
 
-        // Fetch user's workouts
+        // Fetch Workouts
         const { data: wData, error: wError } = await supabase
           .from('entrenos')
           .select('*')
@@ -142,12 +129,12 @@ const App: React.FC = () => {
 
         setWorkouts(mappedWorkouts);
         setCustomCategories([...MUSCLE_GROUPS]);
-        setIsInitialized(true);
+        setInitializationError(null);
       } catch (err: any) {
-        console.error("Account Sync Error:", err.message);
-        setInitializationError(err.message.includes('not found') ? "Cloud tables not detected. Check schema." : "Sync failed.");
-        setIsInitialized(true);
+        console.error("Sync Error:", err.message);
+        setInitializationError(err.message.includes('not found') ? "Cloud schema mismatch." : "Connection failed.");
       } finally {
+        setIsInitialized(true);
         setIsSyncing(false);
       }
     };
@@ -156,32 +143,27 @@ const App: React.FC = () => {
   }, [session]);
 
   const addWorkout = async (newWorkout: Omit<Workout, 'userId' | 'user_id' | 'profile_id'>) => {
-    // FRESH SESSION CHECK: Prevent stale closure errors
-    let currentSession = session;
-    if (!currentSession && supabase) {
-      const { data } = await supabase.auth.getSession();
-      currentSession = data.session;
-    }
-
-    if (!currentSession || !activeProfile) {
+    // FRESH SESSION VERIFICATION: Ensure we don't try to save with a timed-out token
+    const { data: { session: freshSession } } = await supabase!.auth.getSession();
+    
+    if (!freshSession || !activeProfile) {
       setToast({ message: "Please sign in to save", type: 'error' });
-      setActiveView('dashboard');
       return;
     }
 
-    const workoutId = Math.random().toString(36).substr(2, 9);
+    const workoutId = crypto.randomUUID();
     const workoutToSave: Workout = { 
       ...newWorkout, 
       id: workoutId, 
       profile_id: activeProfile.id,
-      user_id: currentSession.user.id 
+      user_id: freshSession.user.id 
     };
 
     setIsSyncing(true);
     try {
       const payload = {
         entreno_id: workoutId,
-        usuario_id: currentSession.user.id,
+        usuario_id: freshSession.user.id,
         nombre_rutina: workoutToSave.title,
         fecha: workoutToSave.date,
         duracion_minutos: workoutToSave.duration || 0,
@@ -198,14 +180,14 @@ const App: React.FC = () => {
       if (error) throw error;
       
       setWorkouts([workoutToSave, ...workouts]);
-      setToast({ message: "Workout saved", type: 'success' });
+      setToast({ message: "Workout synced", type: 'success' });
+      setActiveView('dashboard');
     } catch (err: any) {
-      setToast({ message: "Save failed - RLS or Network error", type: 'error' });
-      // Don't save locally if auth failed to keep data integrity
+      console.error("Save Error:", err);
+      setToast({ message: "Sync failed - RLS error", type: 'error' });
     } finally {
       setIsSyncing(false);
     }
-    setActiveView('dashboard');
   };
 
   const deleteWorkout = async (id: string) => {
@@ -224,29 +206,22 @@ const App: React.FC = () => {
   };
 
   const handleUpdateProfile = async (updated: UserProfile) => {
+    if (!supabase || !session) return;
     setActiveProfile(updated);
-    if (supabase && session) {
-      try {
-        await supabase.from('usuarios').upsert({
-          id: updated.id,
-          usuario_id: session.user.id,
-          name: updated.name,
-          color: updated.color,
-          last_used_at: new Date().toISOString()
-        });
-        setToast({ message: "Profile updated", type: 'success' });
-      } catch (err) { console.error("Update error", err); }
-    }
+    try {
+      await supabase.from('usuarios').update({
+        name: updated.name,
+        color: updated.color
+      }).eq('usuario_id', session.user.id);
+      setToast({ message: "Account updated", type: 'success' });
+    } catch (err) { console.error("Profile update error", err); }
   };
 
   const handleLogout = async () => {
-    if (supabase) {
-      await supabase.auth.signOut();
-      // Logic inside useEffect(onAuthStateChange) will handle state cleanup
-    }
+    if (supabase) await supabase.auth.signOut();
   };
 
-  // 3. Conditional Rendering based on Auth
+  // Auth Guard
   if (isSupabaseConfigured && !session && isInitialized) {
     return <AuthScreen />;
   }
@@ -258,7 +233,7 @@ const App: React.FC = () => {
           <h1 className="text-2xl font-black bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent uppercase tracking-tighter">GYM TRACKER</h1>
           <div className="flex items-center gap-1.5 mt-0.5">
             {isSyncing ? <RefreshCw size={10} className="text-emerald-400 animate-spin" /> : <Cloud size={10} className="text-emerald-500" />}
-            <p className="text-[8px] text-slate-500 font-bold uppercase tracking-[0.2em]">{isSyncing ? 'Syncing...' : 'Account Secure'}</p>
+            <p className="text-[8px] text-slate-500 font-bold uppercase tracking-[0.2em]">{isSyncing ? 'Syncing...' : 'Encrypted Cloud'}</p>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -279,7 +254,7 @@ const App: React.FC = () => {
         {!isInitialized ? (
           <div className="flex flex-col items-center justify-center py-20 gap-4">
             <Loader2 className="text-emerald-500 animate-spin" size={32} />
-            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Verifying Session...</p>
+            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Identifying Account...</p>
           </div>
         ) : initializationError ? (
           <div className="flex flex-col items-center justify-center py-20 gap-6 text-center">
@@ -288,7 +263,7 @@ const App: React.FC = () => {
               <h2 className="text-lg font-black text-white uppercase tracking-tight">Sync Failure</h2>
               <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mt-2 px-8 leading-relaxed">{initializationError}</p>
             </div>
-            <button onClick={() => window.location.reload()} className="px-6 py-3 bg-slate-800 border border-slate-700 rounded-2xl text-[10px] font-black text-white uppercase tracking-widest flex items-center gap-2 active:scale-95 transition-all"><RefreshCw size={14} /> Retry Sync</button>
+            <button onClick={() => window.location.reload()} className="px-6 py-3 bg-slate-800 border border-slate-700 rounded-2xl text-[10px] font-black text-white uppercase tracking-widest flex items-center gap-2 active:scale-95 transition-all"><RefreshCw size={14} /> Retry</button>
           </div>
         ) : (
           <>
