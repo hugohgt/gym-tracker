@@ -111,19 +111,28 @@ const App: React.FC = () => {
         if (wError) throw wError;
 
         const mappedWorkouts: Workout[] = (wData || []).map(raw => {
-          let obs: any = {};
-          try { obs = JSON.parse(raw.observaciones || '{}'); } catch { obs = { notes: raw.observaciones }; }
+          // Backward compatibility: check payload first, fallback to observations
+          let extra: any = raw.payload;
+          if (!extra && raw.observaciones) {
+            try {
+              extra = JSON.parse(raw.observaciones);
+            } catch {
+              extra = { notes: raw.observaciones };
+            }
+          }
+          if (!extra) extra = {};
+
           return {
             id: raw.entreno_id,
             user_id: raw.usuario_id,
-            profile_id: profile.id, 
+            profile_id: extra.profile_id || profile.id, 
             date: raw.fecha,
             title: raw.nombre_rutina,
             duration: raw.duracion_minutos,
-            exercises: obs.exercises || [],
-            type: obs.type || 'strength',
-            quality: obs.quality || 'normal',
-            notes: obs.notes || ''
+            exercises: extra.exercises || [],
+            type: extra.type || 'strength',
+            quality: extra.quality || 'normal',
+            notes: extra.notes || (typeof raw.observaciones === 'string' ? raw.observaciones : '')
           };
         });
 
@@ -161,22 +170,25 @@ const App: React.FC = () => {
 
     setIsSyncing(true);
     try {
-      const payload = {
+      const dbPayload = {
         entreno_id: workoutId,
         usuario_id: freshSession.user.id,
         nombre_rutina: workoutToSave.title,
         fecha: workoutToSave.date,
         duracion_minutos: workoutToSave.duration || 0,
-        observaciones: JSON.stringify({
+        // Using native payload field for JSON storage
+        payload: {
           exercises: workoutToSave.exercises,
           type: workoutToSave.type,
           quality: workoutToSave.quality,
           notes: workoutToSave.notes,
           profile_id: activeProfile.id 
-        })
+        },
+        // Store notes in observations for readability
+        observaciones: workoutToSave.notes || null
       };
 
-      const { error } = await supabase!.from('entrenos').insert([payload]);
+      const { error } = await supabase!.from('entrenos').insert([dbPayload]);
       if (error) throw error;
       
       setWorkouts([workoutToSave, ...workouts]);
