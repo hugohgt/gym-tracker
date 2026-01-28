@@ -61,6 +61,7 @@ export interface Exercise {
 
 export interface Workout {
   id: string;
+  client_id?: string; // Unique ID for sync tracking
   user_id: string; 
   profile_id?: string;
   date: string;

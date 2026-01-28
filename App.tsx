@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { LayoutDashboard, History, PlusCircle, BarChart3, User, X, Timer as TimerIcon, CheckCircle2, AlertTriangle, LogOut, Cloud, RefreshCw, Loader2, Database } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { LayoutDashboard, History, PlusCircle, BarChart3, User, X, Timer as TimerIcon, CheckCircle2, AlertTriangle, LogOut, Cloud, RefreshCw, Loader2, Database, WifiOff } from 'lucide-react';
 import { Workout, ViewType, UserProfile, MUSCLE_GROUPS, WorkoutTemplate } from './types';
 import Dashboard from './components/Dashboard';
 import HistoryView from './components/HistoryView';
@@ -12,6 +12,7 @@ import ProfileSwitcher from './components/ProfileSwitcher';
 import { AuthScreen } from './components/AuthScreen';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
 import { normalizeWorkout, normalizeTemplate } from './storage/appStorage';
+import * as syncQueue from './storage/syncQueue';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<any>(null);
@@ -25,12 +26,13 @@ const App: React.FC = () => {
   const [toast, setToastInternal] = useState<{message: string, type: 'success'|'error', id: number} | null>(null);
   const [historyDateFilter, setHistoryDateFilter] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
 
-  const setToast = (t: {message: string, type: 'success' | 'error'} | null) => {
+  const setToast = useCallback((t: {message: string, type: 'success' | 'error'} | null) => {
     if (!t) { setToastInternal(null); return; }
     setToastInternal({ ...t, id: Date.now() });
     setTimeout(() => setToastInternal(null), 3000);
-  };
+  }, []);
 
   // 1. Unified Auth Listener (Source of Truth)
   useEffect(() => {
@@ -39,18 +41,14 @@ const App: React.FC = () => {
       return;
     }
 
-    // Initial check
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (!session) setIsInitialized(true);
     });
 
-    // Listen for events
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, newSession) => {
       setSession(newSession);
-      
       if (event === 'SIGNED_OUT') {
-        // Full state reset on logout to prevent "Broken Screen" or stale data
         setWorkouts([]);
         setTemplates([]);
         setActiveProfile(null);
@@ -63,7 +61,94 @@ const App: React.FC = () => {
     return () => subscription.unsubscribe();
   }, []);
 
-  // 2. Data Synchronization & Profile Bootstrapping
+  // 2. Sync Logic
+  const syncPendingWorkouts = useCallback(async () => {
+    if (!supabase || !session || !navigator.onLine) return;
+    
+    const pending = await syncQueue.listQueuedWorkouts();
+    if (pending.length === 0) return;
+
+    setIsSyncing(true);
+    for (const item of pending) {
+      try {
+        const payload = {
+          entreno_id: item.id,
+          usuario_id: session.user.id,
+          client_id: item.client_id || item.id,
+          nombre_rutina: item.title,
+          fecha: item.date,
+          duracion_minutos: item.duration || 0,
+          payload: {
+            exercises: item.exercises,
+            type: item.type,
+            quality: item.quality,
+            notes: item.notes,
+            profile_id: item.profile_id
+          },
+          observaciones: item.notes || null
+        };
+
+        const { error } = await supabase.from('entrenos').insert([payload]);
+        
+        // Error code 23505 is a unique constraint violation (already synced)
+        if (!error || error.code === '23505') {
+          await syncQueue.removeQueuedWorkout(item.client_id || item.id);
+        }
+      } catch (err) {
+        console.error("Sync item failed:", err);
+      }
+    }
+    
+    // Refresh workout list after sync
+    const { data } = await supabase
+      .from('entrenos')
+      .select('*')
+      .eq('usuario_id', session.user.id)
+      .order('fecha', { ascending: false });
+    
+    if (data) {
+      const profile = activeProfile;
+      const mappedWorkouts: Workout[] = data.map(raw => {
+        let extra: any = raw.payload || {};
+        return {
+          id: raw.entreno_id,
+          client_id: raw.client_id,
+          user_id: raw.usuario_id,
+          profile_id: extra.profile_id || profile?.id, 
+          date: raw.fecha,
+          title: raw.nombre_rutina,
+          duration: raw.duracion_minutos,
+          exercises: extra.exercises || [],
+          type: extra.type || 'strength',
+          quality: extra.quality || 'normal',
+          notes: extra.notes || raw.observaciones || ''
+        };
+      });
+      setWorkouts(mappedWorkouts);
+    }
+    
+    setIsSyncing(false);
+  }, [session, activeProfile]);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      syncPendingWorkouts();
+    };
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    
+    if (session) syncPendingWorkouts();
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [session, syncPendingWorkouts]);
+
+  // 3. Data Synchronization & Profile Bootstrapping
   useEffect(() => {
     if (!session) return;
 
@@ -71,7 +156,6 @@ const App: React.FC = () => {
       if (!supabase) return;
       setIsSyncing(true);
       try {
-        // Fetch profile (Linked via RLS: usuario_id = auth.uid())
         let { data: pData, error: pError } = await supabase
           .from('usuarios')
           .select('*')
@@ -80,7 +164,6 @@ const App: React.FC = () => {
 
         if (pError) throw pError;
 
-        // BOOTSTRAP: Automate profile creation for new users
         if (!pData) {
           const emailName = session.user.email?.split('@')[0] || 'User';
           const { data: created, error: createError } = await supabase
@@ -101,7 +184,6 @@ const App: React.FC = () => {
         const profile: UserProfile = { ...pData, user_id: pData.usuario_id };
         setActiveProfile(profile);
 
-        // Fetch Workouts
         const { data: wData, error: wError } = await supabase
           .from('entrenos')
           .select('*')
@@ -111,19 +193,13 @@ const App: React.FC = () => {
         if (wError) throw wError;
 
         const mappedWorkouts: Workout[] = (wData || []).map(raw => {
-          // Backward compatibility: check payload first, fallback to observations
-          let extra: any = raw.payload;
-          if (!extra && raw.observaciones) {
-            try {
-              extra = JSON.parse(raw.observaciones);
-            } catch {
-              extra = { notes: raw.observaciones };
-            }
+          let extra: any = raw.payload || {};
+          if (!raw.payload && raw.observaciones) {
+            try { extra = JSON.parse(raw.observaciones); } catch { extra = { notes: raw.observaciones }; }
           }
-          if (!extra) extra = {};
-
           return {
             id: raw.entreno_id,
+            client_id: raw.client_id,
             user_id: raw.usuario_id,
             profile_id: extra.profile_id || profile.id, 
             date: raw.fecha,
@@ -132,7 +208,7 @@ const App: React.FC = () => {
             exercises: extra.exercises || [],
             type: extra.type || 'strength',
             quality: extra.quality || 'normal',
-            notes: extra.notes || (typeof raw.observaciones === 'string' ? raw.observaciones : '')
+            notes: extra.notes || raw.observaciones || ''
           };
         });
 
@@ -152,7 +228,6 @@ const App: React.FC = () => {
   }, [session]);
 
   const addWorkout = async (newWorkout: Omit<Workout, 'userId' | 'user_id' | 'profile_id'>) => {
-    // FRESH SESSION VERIFICATION: Ensure we don't try to save with a timed-out token
     const { data: { session: freshSession } } = await supabase!.auth.getSession();
     
     if (!freshSession || !activeProfile) {
@@ -164,39 +239,49 @@ const App: React.FC = () => {
     const workoutToSave: Workout = { 
       ...newWorkout, 
       id: workoutId, 
+      client_id: workoutId,
       profile_id: activeProfile.id,
       user_id: freshSession.user.id 
     };
 
     setIsSyncing(true);
-    try {
-      const dbPayload = {
-        entreno_id: workoutId,
-        usuario_id: freshSession.user.id,
-        nombre_rutina: workoutToSave.title,
-        fecha: workoutToSave.date,
-        duracion_minutos: workoutToSave.duration || 0,
-        // Using native payload field for JSON storage
-        payload: {
-          exercises: workoutToSave.exercises,
-          type: workoutToSave.type,
-          quality: workoutToSave.quality,
-          notes: workoutToSave.notes,
-          profile_id: activeProfile.id 
-        },
-        // Store notes in observations for readability
-        observaciones: workoutToSave.notes || null
-      };
+    
+    const dbPayload = {
+      entreno_id: workoutId,
+      usuario_id: freshSession.user.id,
+      client_id: workoutId,
+      nombre_rutina: workoutToSave.title,
+      fecha: workoutToSave.date,
+      duracion_minutos: workoutToSave.duration || 0,
+      payload: {
+        exercises: workoutToSave.exercises,
+        type: workoutToSave.type,
+        quality: workoutToSave.quality,
+        notes: workoutToSave.notes,
+        profile_id: activeProfile.id 
+      },
+      observaciones: workoutToSave.notes || null
+    };
 
+    try {
       const { error } = await supabase!.from('entrenos').insert([dbPayload]);
-      if (error) throw error;
+      
+      if (error) {
+        // Handle auth/policy errors - do not queue
+        if (error.status === 401 || error.status === 403) throw error;
+        // Network errors or timeout - queue it
+        throw new Error("Network failure");
+      }
       
       setWorkouts([workoutToSave, ...workouts]);
       setToast({ message: "Workout synced", type: 'success' });
       setActiveView('dashboard');
     } catch (err: any) {
-      console.error("Save Error:", err);
-      setToast({ message: "Sync failed - RLS error", type: 'error' });
+      // Offline-first fallback
+      await syncQueue.queueWorkout(workoutToSave);
+      setWorkouts([workoutToSave, ...workouts]);
+      setToast({ message: "Saved locally. Syncing later.", type: 'success' });
+      setActiveView('dashboard');
     } finally {
       setIsSyncing(false);
     }
@@ -233,7 +318,6 @@ const App: React.FC = () => {
     if (supabase) await supabase.auth.signOut();
   };
 
-  // Auth Guard
   if (isSupabaseConfigured && !session && isInitialized) {
     return <AuthScreen />;
   }
@@ -244,8 +328,12 @@ const App: React.FC = () => {
         <div>
           <h1 className="text-2xl font-black bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent uppercase tracking-tighter">GYM TRACKER</h1>
           <div className="flex items-center gap-1.5 mt-0.5">
-            {isSyncing ? <RefreshCw size={10} className="text-emerald-400 animate-spin" /> : <Cloud size={10} className="text-emerald-500" />}
-            <p className="text-[8px] text-slate-500 font-bold uppercase tracking-[0.2em]">{isSyncing ? 'Syncing...' : 'Encrypted Cloud'}</p>
+            {isSyncing ? <RefreshCw size={10} className="text-emerald-400 animate-spin" /> : 
+             !isOnline ? <WifiOff size={10} className="text-amber-500" /> :
+             <Cloud size={10} className="text-emerald-500" />}
+            <p className="text-[8px] text-slate-500 font-bold uppercase tracking-[0.2em]">
+              {isSyncing ? 'Syncing...' : !isOnline ? 'Offline Mode' : 'Encrypted Cloud'}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -291,6 +379,7 @@ const App: React.FC = () => {
                 availableCategories={customCategories}
                 onAddCategory={(cat) => setCustomCategories([...customCategories, cat])}
                 onToast={setToast}
+                isSaving={isSyncing}
               />
             )}
             {activeView === 'stats' && <Analytics workouts={workouts} />}
