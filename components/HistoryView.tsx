@@ -21,30 +21,13 @@ const HistoryView: React.FC<HistoryViewProps> = ({ workouts, onDelete, dateFilte
   }, [workouts, dateFilter]);
 
   /**
-   * Safe helper to get exercise count from workout, checking legacy keys.
+   * Safe helper to get exercise count from workout, checking legacy and payload structures.
    */
   const getExerciseCount = (workout: any) => {
     if (!workout) return 0;
-    const exercises = workout.exercises || workout.items || workout.movements || workout.entries || workout.workoutExercises;
-    const count = Array.isArray(exercises) ? exercises.length : 0;
-    
-    // Debug: Detect workouts with potential hidden data
-    if (count === 0) {
-      const keys = Object.keys(workout);
-      const dataKeys = ['items', 'movements', 'entries', 'workoutExercises'];
-      const foundLegacyKey = dataKeys.find(k => keys.includes(k) && Array.isArray(workout[k]) && workout[k].length > 0);
-      
-      if (foundLegacyKey) {
-        console.warn(`[DEBUG] Bad Workout Data Detected: count=0 but found legacy key "${foundLegacyKey}"`, {
-          id: workout.id,
-          date: workout.date,
-          keys: keys,
-          workout: workout
-        });
-      }
-    }
-    
-    return count;
+    const safePayload = workout.payload ?? {};
+    const exercises = safePayload.exercises ?? workout.exercises ?? workout.items ?? workout.movements ?? workout.entries ?? workout.workoutExercises ?? [];
+    return Array.isArray(exercises) ? exercises.length : 0;
   };
 
   if (workouts.length === 0) {
@@ -117,118 +100,123 @@ const HistoryView: React.FC<HistoryViewProps> = ({ workouts, onDelete, dateFilte
         </div>
       )}
 
-      {filteredWorkouts.map((workout) => (
-        <div key={workout.id} className="bg-slate-800/50 border border-slate-700 rounded-[2rem] overflow-hidden shadow-sm transition-all">
-          <div 
-            className="p-5 flex items-center justify-between cursor-pointer active:bg-slate-800/80 transition-colors" 
-            onClick={() => setExpandedId(expandedId === workout.id ? null : workout.id)}
-          >
-            <div className="flex-1">
-              <div className="flex items-center gap-2 mb-1">
-                <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-full border ${
-                  workout.type === 'strength' ? 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20' : 
-                  workout.type === 'cardio' ? 'text-cyan-400 bg-cyan-400/10 border-cyan-400/20' : 
-                  'text-indigo-400 bg-indigo-400/10 border-indigo-400/20'
-                }`}>{workout.type}</span>
-                {workout.quality && workout.quality !== 'normal' && (
-                  <span className="text-[8px] font-black uppercase text-slate-500 bg-slate-900/50 px-2 py-0.5 rounded-full border border-slate-700/50">
-                    {workout.quality}
-                  </span>
-                )}
-                <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">{formatDate(workout.date)}</span>
+      {filteredWorkouts.map((workout) => {
+        const safePayload = workout.payload ?? {};
+        const exercises = safePayload.exercises ?? workout.exercises ?? [];
+        
+        return (
+          <div key={workout.id} className="bg-slate-800/50 border border-slate-700 rounded-[2rem] overflow-hidden shadow-sm transition-all">
+            <div 
+              className="p-5 flex items-center justify-between cursor-pointer active:bg-slate-800/80 transition-colors" 
+              onClick={() => setExpandedId(expandedId === workout.id ? null : workout.id)}
+            >
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-full border ${
+                    workout.type === 'strength' ? 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20' : 
+                    workout.type === 'cardio' ? 'text-cyan-400 bg-cyan-400/10 border-cyan-400/20' : 
+                    'text-indigo-400 bg-indigo-400/10 border-indigo-400/20'
+                  }`}>{workout.type}</span>
+                  {workout.quality && workout.quality !== 'normal' && (
+                    <span className="text-[8px] font-black uppercase text-slate-500 bg-slate-900/50 px-2 py-0.5 rounded-full border border-slate-700/50">
+                      {workout.quality}
+                    </span>
+                  )}
+                  <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">{formatDate(workout.date)}</span>
+                </div>
+                <h3 className="text-sm font-black text-slate-100 uppercase tracking-tight">{workout.title}</h3>
+                <div className="flex items-center gap-3 mt-1 text-[9px] font-black text-slate-400 uppercase tracking-widest">
+                  <div className="flex items-center gap-1">{getTypeIcon(workout.type)}{getExerciseCount(workout)} Exercises</div>
+                </div>
               </div>
-              <h3 className="text-sm font-black text-slate-100 uppercase tracking-tight">{workout.title}</h3>
-              <div className="flex items-center gap-3 mt-1 text-[9px] font-black text-slate-400 uppercase tracking-widest">
-                <div className="flex items-center gap-1">{getTypeIcon(workout.type)}{getExerciseCount(workout)} Exercises</div>
-              </div>
+              {expandedId === workout.id ? <ChevronUp className="text-slate-500" /> : <ChevronDown className="text-slate-500" />}
             </div>
-            {expandedId === workout.id ? <ChevronUp className="text-slate-500" /> : <ChevronDown className="text-slate-500" />}
-          </div>
 
-          {expandedId === workout.id && (
-            <div className="p-5 border-t border-slate-700 bg-slate-900/30 space-y-6 animate-in slide-in-from-top-2 duration-300">
-              {workout.exercises && workout.exercises.length > 0 ? workout.exercises.map((ex, idx) => (
-                <div key={idx} className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-black text-slate-100 flex items-center gap-2 uppercase tracking-tight">
-                      <span className={`w-1 h-3 rounded-full ${workout.type === 'strength' ? 'bg-emerald-500' : workout.type === 'cardio' ? 'bg-cyan-500' : 'bg-indigo-500'}`}></span>
-                      {ex.name}
-                      {ex.isPR && <Trophy size={12} className="text-yellow-400 fill-current ml-1" />}
-                    </h4>
-                    {ex.category && (
-                      <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700 text-[8px] font-black uppercase tracking-widest">
-                        <Tag size={8} /> {ex.category}
-                      </span>
+            {expandedId === workout.id && (
+              <div className="p-5 border-t border-slate-700 bg-slate-900/30 space-y-6 animate-in slide-in-from-top-2 duration-300">
+                {exercises.length > 0 ? exercises.map((ex, idx) => (
+                  <div key={idx} className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-black text-slate-100 flex items-center gap-2 uppercase tracking-tight">
+                        <span className={`w-1 h-3 rounded-full ${workout.type === 'strength' ? 'bg-emerald-500' : workout.type === 'cardio' ? 'bg-cyan-500' : 'bg-indigo-500'}`}></span>
+                        {ex.name}
+                        {ex.isPR && <Trophy size={12} className="text-yellow-400 fill-current ml-1" />}
+                      </h4>
+                      {ex.category && (
+                        <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700 text-[8px] font-black uppercase tracking-widest">
+                          <Tag size={8} /> {ex.category}
+                        </span>
+                      )}
+                    </div>
+                    
+                    {ex.tags && ex.tags.length > 0 && (
+                      <div className="flex gap-1 pl-3">
+                        {ex.tags.map(tag => (
+                          <span key={tag} className="text-[7px] text-slate-500 bg-slate-800 px-1.5 py-0.5 rounded-md font-bold uppercase">{tag}</span>
+                        ))}
+                      </div>
                     )}
-                  </div>
-                  
-                  {ex.tags && ex.tags.length > 0 && (
-                    <div className="flex gap-1 pl-3">
-                      {ex.tags.map(tag => (
-                        <span key={tag} className="text-[7px] text-slate-500 bg-slate-800 px-1.5 py-0.5 rounded-md font-bold uppercase">{tag}</span>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pl-3">
+                      {ex.sets.map((s, sIdx) => (
+                        <div key={sIdx} className="bg-slate-800/80 p-2.5 rounded-2xl text-center border border-slate-700/50 flex flex-col justify-center min-h-[55px] shadow-sm">
+                          {workout.type === 'strength' && (
+                            <>
+                              {(!s.metricType || s.metricType === 'reps') ? (
+                                <>
+                                  <div className="text-xs font-black text-slate-100 leading-tight">{s.weight}kg</div>
+                                  <div className="text-[9px] font-bold text-slate-500 uppercase">x {s.metricValue || s.reps || 0} reps</div>
+                                </>
+                              ) : (
+                                <>
+                                  <div className="text-xs font-black text-cyan-400 leading-tight">{s.metricValue || s.time || 0} {s.metricType}</div>
+                                  <div className="text-[9px] font-bold text-slate-500 uppercase">Timed Set</div>
+                                </>
+                              )}
+                            </>
+                          )}
+                          {workout.type === 'cardio' && (
+                            <>
+                              <div className="text-xs font-black text-cyan-400 leading-tight">{s.distance} km</div>
+                              <div className="text-[9px] font-bold text-slate-500 uppercase">{s.time}m • {s.pace}/km</div>
+                            </>
+                          )}
+                          {workout.type === 'mobility' && (
+                            <>
+                              <div className="text-xs font-black text-indigo-400 leading-tight">{s.metricValue || s.reps || 0} {s.metricType || 'reps'}</div>
+                              <div className="text-[9px] font-bold text-slate-500 uppercase">{s.holdTime || s.time || 0}s hold</div>
+                            </>
+                          )}
+                          {s.rpe && (
+                            <div className={`text-[7px] font-black uppercase mt-1 ${s.rpe >= 9 ? 'text-rose-400' : s.rpe >= 7 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                              RPE {s.rpe}
+                            </div>
+                          )}
+                        </div>
                       ))}
                     </div>
-                  )}
-
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pl-3">
-                    {ex.sets.map((s, sIdx) => (
-                      <div key={sIdx} className="bg-slate-800/80 p-2.5 rounded-2xl text-center border border-slate-700/50 flex flex-col justify-center min-h-[55px] shadow-sm">
-                        {workout.type === 'strength' && (
-                          <>
-                            {(!s.metricType || s.metricType === 'reps') ? (
-                              <>
-                                <div className="text-xs font-black text-slate-100 leading-tight">{s.weight}kg</div>
-                                <div className="text-[9px] font-bold text-slate-500 uppercase">x {s.metricValue || s.reps || 0} reps</div>
-                              </>
-                            ) : (
-                              <>
-                                <div className="text-xs font-black text-cyan-400 leading-tight">{s.metricValue || s.time || 0} {s.metricType}</div>
-                                <div className="text-[9px] font-bold text-slate-500 uppercase">Timed Set</div>
-                              </>
-                            )}
-                          </>
-                        )}
-                        {workout.type === 'cardio' && (
-                          <>
-                            <div className="text-xs font-black text-cyan-400 leading-tight">{s.distance} km</div>
-                            <div className="text-[9px] font-bold text-slate-500 uppercase">{s.time}m • {s.pace}/km</div>
-                          </>
-                        )}
-                        {workout.type === 'mobility' && (
-                          <>
-                            <div className="text-xs font-black text-indigo-400 leading-tight">{s.metricValue || s.reps || 0} {s.metricType || 'reps'}</div>
-                            <div className="text-[9px] font-bold text-slate-500 uppercase">{s.holdTime || s.time || 0}s hold</div>
-                          </>
-                        )}
-                        {s.rpe && (
-                          <div className={`text-[7px] font-black uppercase mt-1 ${s.rpe >= 9 ? 'text-rose-400' : s.rpe >= 7 ? 'text-amber-400' : 'text-emerald-400'}`}>
-                            RPE {s.rpe}
-                          </div>
-                        )}
-                      </div>
-                    ))}
                   </div>
+                )) : (
+                  <div className="py-8 text-center bg-slate-900/50 rounded-2xl border border-dashed border-slate-800">
+                     <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest">No detailed exercise data found for this entry.</p>
+                  </div>
+                )}
+                <div className="pt-4 border-t border-slate-800 flex justify-end">
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setWorkoutToDelete(workout);
+                    }} 
+                    className="text-[10px] font-black text-slate-600 hover:text-red-400 flex items-center gap-1.5 uppercase tracking-widest transition-colors py-2 px-3 rounded-xl hover:bg-red-500/5"
+                  >
+                    <Trash2 size={12} /> Delete Entry
+                  </button>
                 </div>
-              )) : (
-                <div className="py-8 text-center bg-slate-900/50 rounded-2xl border border-dashed border-slate-800">
-                   <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest">No detailed exercise data found for this entry.</p>
-                </div>
-              )}
-              <div className="pt-4 border-t border-slate-800 flex justify-end">
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setWorkoutToDelete(workout);
-                  }} 
-                  className="text-[10px] font-black text-slate-600 hover:text-red-400 flex items-center gap-1.5 uppercase tracking-widest transition-colors py-2 px-3 rounded-xl hover:bg-red-500/5"
-                >
-                  <Trash2 size={12} /> Delete Entry
-                </button>
               </div>
-            </div>
-          )}
-        </div>
-      ))}
+            )}
+          </div>
+        );
+      })}
 
       {/* Delete Confirmation Modal */}
       {workoutToDelete && (

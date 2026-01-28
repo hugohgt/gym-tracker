@@ -55,13 +55,22 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
 
   const historyItems = useMemo(() => {
     const items = new Map<string, { name: string; category: string; tags: string[] }>();
-    previousWorkouts.forEach(w => w.exercises.forEach(ex => {
-      items.set(ex.name.toLowerCase(), { 
-        name: ex.name, 
-        category: ex.category || 'General', 
-        tags: ex.tags || [] 
+    previousWorkouts.forEach(w => {
+      // Defensive adapter for reading exercises from history
+      const workoutAny = w as any;
+      const safePayload = workoutAny.payload ?? {};
+      const exList = safePayload.exercises ?? w.exercises ?? [];
+      
+      exList.forEach((ex: any) => {
+        if (ex && ex.name) {
+          items.set(ex.name.toLowerCase(), { 
+            name: ex.name, 
+            category: ex.category || 'General', 
+            tags: ex.tags || [] 
+          });
+        }
       });
-    }));
+    });
     return Array.from(items.values()).sort((a, b) => a.name.localeCompare(b.name));
   }, [previousWorkouts]);
 
@@ -85,10 +94,15 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
   };
 
   const handleRepeatSelection = (pastWorkout: Workout | WorkoutTemplate, isTemplate: boolean = false) => {
-    const clonedExercises: Exercise[] = pastWorkout.exercises.map(ex => ({
+    // Defensive adapter for repeating past workouts or using templates
+    const workoutAny = pastWorkout as any;
+    const safePayload = workoutAny.payload ?? {};
+    const sourceExercises = safePayload.exercises ?? pastWorkout.exercises ?? [];
+
+    const clonedExercises: Exercise[] = sourceExercises.map((ex: any) => ({
       ...ex,
       id: Date.now().toString() + Math.random(),
-      sets: ex.sets.map(s => ({
+      sets: (ex.sets || []).map((s: any) => ({
         ...s,
         id: Math.random().toString(),
         completed: false
@@ -131,7 +145,7 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
         metricValue: 0
       }]
     };
-    setExercises([...exercises, newEx]);
+    setExercises(prev => [...prev, newEx]);
     setSearchTerm('');
     setIsSearchFocused(false);
   };
@@ -154,6 +168,7 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
     setActiveAutocompleteExId(null);
   };
 
+  // Fix: Corrected 'id' to 'exId' to properly reference the function parameter.
   const updateExerciseCategory = (exId: string, category: string) => {
     setExercises(prev => prev.map(ex => ex.id === exId ? { ...ex, category } : ex));
     setEditingCategoryFor(null);
@@ -299,6 +314,9 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
     );
   }
 
+  // Session safe exercises list
+  const activeExercises = exercises || [];
+
   return (
     <div className="fixed inset-0 bg-slate-900 z-[100] flex flex-col overflow-hidden font-sans">
       <div className="p-6 bg-slate-900 border-b border-slate-800/50 shrink-0">
@@ -313,7 +331,7 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
           </div>
           <button 
             onClick={handleSave} 
-            disabled={isSaving || exercises.length === 0}
+            disabled={isSaving || activeExercises.length === 0}
             className={`${isEditingTemplateMode ? 'bg-indigo-500' : 'bg-emerald-500'} text-slate-900 h-9 px-4 rounded-xl font-black text-[10px] tracking-widest shadow-lg active:scale-95 transition-transform flex items-center gap-2 disabled:opacity-50 disabled:grayscale`}
           >
             {isSaving ? <Loader2 size={14} className="animate-spin" /> : (isEditingTemplateMode ? 'SAVE' : 'SAVE')}
@@ -341,7 +359,7 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
             {isSearchFocused && <div className="fixed inset-0 z-10" onClick={() => setIsSearchFocused(false)}></div>}
           </div>
 
-          {exercises.map((ex, exIdx) => (
+          {activeExercises.map((ex, exIdx) => (
             <div key={ex.id} className="bg-slate-800/40 rounded-[2rem] border border-slate-700/60 overflow-hidden shadow-lg">
               <div className="p-5 border-b border-slate-700/50 bg-slate-800/20">
                 <div className="flex items-center justify-between gap-4">
