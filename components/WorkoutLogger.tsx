@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Workout, Exercise, Set as WorkoutSet, WorkoutType, WorkoutTemplate, WorkoutQuality } from '../types';
-import { X, Plus, Trash2, CheckCircle, Dumbbell, Calendar, Search, Heart, ArrowLeft, ChevronRight, Loader2, Star, Info, Clock, Copy } from 'lucide-react';
+import { X, Plus, Trash2, CheckCircle, Dumbbell, Calendar, Search, Heart, ArrowLeft, ChevronRight, ChevronLeft, Loader2, Star, Info, Clock, Copy } from 'lucide-react';
 
 interface WorkoutLoggerProps {
   onSave: (workout: any) => void;
@@ -31,13 +31,13 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [title, setTitle] = useState('');
   const [workoutDate, setWorkoutDate] = useState(new Date().toISOString().split('T')[0]);
+  const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   
   const [strengthExercises, setStrengthExercises] = useState<Exercise[]>([]);
   const [cardioExercises, setCardioExercises] = useState<Exercise[]>([]);
   
   const [searchTerm, setSearchTerm] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const dateInputRef = useRef<HTMLInputElement>(null);
 
   const activeExercises = workoutType === 'strength' ? strengthExercises : cardioExercises;
   
@@ -48,6 +48,16 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
       setCardioExercises(update);
     }
   };
+
+  // Prevent background scroll when date picker is open
+  useEffect(() => {
+    if (isDatePickerOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => { document.body.style.overflow = ''; };
+  }, [isDatePickerOpen]);
 
   const historyItems = useMemo(() => {
     const items = new Map<string, { name: string; category: string; tags: string[] }>();
@@ -95,7 +105,6 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
   const createDefaultSet = (): WorkoutSet => {
     const base = { id: crypto.randomUUID(), completed: false };
     if (workoutType === 'cardio') return { ...base, distance: 0, time: 0, pace: '0:00' };
-    // Default RPE to 7 for Strength
     return { ...base, weight: 0, metricValue: 0, metricType: 'reps', rpe: 7 };
   };
 
@@ -164,7 +173,7 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
           ...last, 
           id: crypto.randomUUID(), 
           completed: false,
-          rpe: 7 // Ensure default RPE is 7 for new sets as requested
+          rpe: 7
         }] 
       };
     }));
@@ -219,19 +228,6 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
   const formatDateString = (dateStr: string) => {
     const d = new Date(dateStr);
     return `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getFullYear()}`;
-  };
-
-  const triggerDatePicker = () => {
-    if (!dateInputRef.current) return;
-    try {
-      if (typeof dateInputRef.current.showPicker === 'function') {
-        dateInputRef.current.showPicker();
-      } else {
-        dateInputRef.current.click();
-      }
-    } catch (e) {
-      dateInputRef.current.click();
-    }
   };
 
   if (isSelectingRepeat) {
@@ -293,7 +289,6 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
 
   return (
     <div className="fixed inset-0 bg-slate-900 z-[100] flex flex-col overflow-hidden font-sans">
-      {/* Restored Compact Header */}
       <div className="p-6 bg-slate-900 shrink-0 relative">
         <div className="max-w-md mx-auto w-full flex justify-between items-center h-12">
           <button onClick={() => setWorkoutType(null)} className="p-2 -ml-2 text-slate-500 hover:text-white z-10">
@@ -303,14 +298,10 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
           <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
             <h1 className="text-[15px] font-black text-white uppercase tracking-tight leading-none">{title}</h1>
             <div className="flex items-center gap-1.5 mt-1 text-slate-500 pointer-events-auto">
-              <input 
-                type="date" 
-                ref={dateInputRef}
-                value={workoutDate} 
-                onChange={(e) => setWorkoutDate(e.target.value)} 
-                className="hidden" 
-              />
-              <button onClick={triggerDatePicker} className="flex items-center gap-1 hover:text-emerald-400 transition-colors">
+              <button 
+                onClick={() => setIsDatePickerOpen(true)} 
+                className="flex items-center gap-1 hover:text-emerald-400 transition-colors active:scale-95"
+              >
                 <Calendar size={12} className="text-emerald-400" />
                 <span className="text-[9px] font-black tracking-widest">{formatDateString(workoutDate)}</span>
               </button>
@@ -337,13 +328,10 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
 
       <div className="flex-1 overflow-y-auto no-scrollbar">
         <div className="max-w-md mx-auto w-full p-4 space-y-6 pb-40">
-          
-          {/* Top Search bar */}
           <div className="relative z-[50]">
             <div className={`flex items-center gap-3 bg-slate-800/20 border ${isSearchFocused ? 'border-emerald-500/50' : 'border-slate-800'} rounded-2xl px-5 py-3.5 shadow-lg transition-colors`}>
               <Search className={`w-5 h-5 ${isSearchFocused ? 'text-emerald-400' : 'text-slate-500'}`} />
               <input 
-                ref={searchInputRef}
                 value={searchTerm} 
                 onChange={(e) => setSearchTerm(e.target.value)} 
                 onFocus={() => setIsSearchFocused(true)} 
@@ -495,6 +483,77 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
           </div>
         </div>
       </div>
+
+      {isDatePickerOpen && (
+        <DatePickerModal 
+          selectedDate={workoutDate}
+          onSelect={(date) => { setWorkoutDate(date); setIsDatePickerOpen(false); }}
+          onClose={() => setIsDatePickerOpen(false)}
+        />
+      )}
+    </div>
+  );
+};
+
+const DatePickerModal: React.FC<{
+  selectedDate: string;
+  onSelect: (date: string) => void;
+  onClose: () => void;
+}> = ({ selectedDate, onSelect, onClose }) => {
+  const [viewDate, setViewDate] = useState(new Date(selectedDate));
+  
+  const daysInMonth = useMemo(() => {
+    const start = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1);
+    const end = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0);
+    const days = [];
+    for (let i = 0; i < start.getDay(); i++) days.push(null);
+    for (let i = 1; i <= end.getDate(); i++) days.push(new Date(viewDate.getFullYear(), viewDate.getMonth(), i));
+    return days;
+  }, [viewDate]);
+
+  const monthName = viewDate.toLocaleString('default', { month: 'long', year: 'numeric' });
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-300">
+      <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] w-full max-w-xs p-6 shadow-2xl animate-in zoom-in-95 duration-300 flex flex-col">
+        <header className="flex justify-between items-center mb-6 px-2">
+          <button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1))} className="p-2 text-slate-500 hover:text-emerald-400"><ChevronLeft size={20}/></button>
+          <span className="text-xs font-black text-white uppercase tracking-widest">{monthName}</span>
+          <button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1))} className="p-2 text-slate-500 hover:text-emerald-400"><ChevronRight size={20}/></button>
+        </header>
+
+        <div className="grid grid-cols-7 gap-1 text-center mb-2">
+          {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map(d => (
+            <div key={d} className="text-[9px] font-black text-slate-600 uppercase">{d}</div>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-7 gap-1 text-center">
+          {daysInMonth.map((date, idx) => {
+            if (!date) return <div key={`empty-${idx}`} />;
+            const isSelected = date.toISOString().split('T')[0] === selectedDate;
+            return (
+              <button 
+                key={idx}
+                onClick={() => onSelect(date.toISOString().split('T')[0])}
+                className={`aspect-square flex items-center justify-center text-[10px] font-black rounded-xl transition-all ${
+                  isSelected ? 'bg-emerald-500 text-slate-950 shadow-lg' : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                }`}
+              >
+                {date.getDate()}
+              </button>
+            );
+          })}
+        </div>
+
+        <button 
+          onClick={onClose}
+          className="mt-6 w-full py-3 bg-slate-800 border border-slate-700 rounded-2xl text-[10px] font-black text-slate-400 uppercase tracking-widest active:scale-95 transition-all"
+        >
+          Cancel
+        </button>
+      </div>
+      <div className="absolute inset-0 z-[-1]" onClick={onClose}></div>
     </div>
   );
 };
@@ -520,11 +579,10 @@ const NamingInput: React.FC<{
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') onConfirm(value);
-    if (e.key === 'Escape') onCancel(); // ESC removes the draft as requested
+    if (e.key === 'Escape') onCancel();
   };
 
   const handleBlur = () => {
-    // Blur no longer removes or confirms the draft. It just hides the suggestions.
     setTimeout(() => setIsFocused(false), 200);
   };
 
