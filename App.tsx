@@ -69,8 +69,8 @@ const App: React.FC = () => {
     if (pending.length === 0) return;
 
     setIsSyncing(true);
-    for (const item of pending) {
-      try {
+    try {
+      for (const item of pending) {
         const payload = {
           entreno_id: item.id,
           usuario_id: session.user.id,
@@ -89,59 +89,50 @@ const App: React.FC = () => {
         };
 
         const { error } = await supabase.from('entrenos').insert([payload]);
-        
-        // Error code 23505 is a unique constraint violation (already synced)
         if (!error || error.code === '23505') {
           await syncQueue.removeQueuedWorkout(item.client_id || item.id);
+        } else {
+          console.error("Sync item failed:", error);
         }
-      } catch (err) {
-        console.error("Sync item failed:", err);
       }
+      
+      const { data } = await supabase
+        .from('entrenos')
+        .select('*')
+        .eq('usuario_id', session.user.id)
+        .order('fecha', { ascending: false });
+      
+      if (data) {
+        setWorkouts(data.map(raw => {
+          const extra = raw.payload || {};
+          return {
+            id: raw.entreno_id,
+            client_id: raw.client_id,
+            user_id: raw.usuario_id,
+            profile_id: extra.profile_id || activeProfile?.id, 
+            date: raw.fecha,
+            title: raw.nombre_rutina,
+            duration: raw.duracion_minutos,
+            exercises: extra.exercises || [],
+            type: extra.type || 'strength',
+            quality: extra.quality || 'normal',
+            notes: extra.notes || raw.observaciones || ''
+          };
+        }));
+      }
+    } catch (e) {
+      console.error("Sync failed", e);
+    } finally {
+      setIsSyncing(false);
     }
-    
-    // Refresh workout list after sync
-    const { data } = await supabase
-      .from('entrenos')
-      .select('*')
-      .eq('usuario_id', session.user.id)
-      .order('fecha', { ascending: false });
-    
-    if (data) {
-      const profile = activeProfile;
-      const mappedWorkouts: Workout[] = data.map(raw => {
-        let extra: any = raw.payload || {};
-        return {
-          id: raw.entreno_id,
-          client_id: raw.client_id,
-          user_id: raw.usuario_id,
-          profile_id: extra.profile_id || profile?.id, 
-          date: raw.fecha,
-          title: raw.nombre_rutina,
-          duration: raw.duracion_minutos,
-          exercises: extra.exercises || [],
-          type: extra.type || 'strength',
-          quality: extra.quality || 'normal',
-          notes: extra.notes || raw.observaciones || ''
-        };
-      });
-      setWorkouts(mappedWorkouts);
-    }
-    
-    setIsSyncing(false);
   }, [session, activeProfile]);
 
   useEffect(() => {
-    const handleOnline = () => {
-      setIsOnline(true);
-      syncPendingWorkouts();
-    };
+    const handleOnline = () => { setIsOnline(true); syncPendingWorkouts(); };
     const handleOffline = () => setIsOnline(false);
-
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
-    
     if (session) syncPendingWorkouts();
-
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
@@ -151,52 +142,26 @@ const App: React.FC = () => {
   // 3. Data Synchronization & Profile Bootstrapping
   useEffect(() => {
     if (!session) return;
-
     const syncAccount = async () => {
       if (!supabase) return;
       setIsSyncing(true);
       try {
-        let { data: pData, error: pError } = await supabase
-          .from('usuarios')
-          .select('*')
-          .eq('usuario_id', session.user.id)
-          .maybeSingle();
-
-        if (pError) throw pError;
-
+        let { data: pData } = await supabase.from('usuarios').select('*').eq('usuario_id', session.user.id).maybeSingle();
         if (!pData) {
-          const emailName = session.user.email?.split('@')[0] || 'User';
-          const { data: created, error: createError } = await supabase
-            .from('usuarios')
-            .insert([{
-              usuario_id: session.user.id,
-              name: emailName.charAt(0).toUpperCase() + emailName.slice(1),
-              color: '#10b981',
-              last_used_at: new Date().toISOString()
-            }])
-            .select()
-            .single();
-          
-          if (createError) throw createError;
+          const { data: created } = await supabase.from('usuarios').insert([{
+            usuario_id: session.user.id,
+            name: (session.user.email?.split('@')[0] || 'User'),
+            color: '#10b981',
+            last_used_at: new Date().toISOString()
+          }]).select().single();
           pData = created;
         }
-
         const profile: UserProfile = { ...pData, user_id: pData.usuario_id };
         setActiveProfile(profile);
 
-        const { data: wData, error: wError } = await supabase
-          .from('entrenos')
-          .select('*')
-          .eq('usuario_id', session.user.id)
-          .order('fecha', { ascending: false });
-
-        if (wError) throw wError;
-
-        const mappedWorkouts: Workout[] = (wData || []).map(raw => {
-          let extra: any = raw.payload || {};
-          if (!raw.payload && raw.observaciones) {
-            try { extra = JSON.parse(raw.observaciones); } catch { extra = { notes: raw.observaciones }; }
-          }
+        const { data: wData } = await supabase.from('entrenos').select('*').eq('usuario_id', session.user.id).order('fecha', { ascending: false });
+        setWorkouts((wData || []).map(raw => {
+          const extra = raw.payload || {};
           return {
             id: raw.entreno_id,
             client_id: raw.client_id,
@@ -210,28 +175,21 @@ const App: React.FC = () => {
             quality: extra.quality || 'normal',
             notes: extra.notes || raw.observaciones || ''
           };
-        });
-
-        setWorkouts(mappedWorkouts);
+        }));
         setCustomCategories([...MUSCLE_GROUPS]);
-        setInitializationError(null);
       } catch (err: any) {
-        console.error("Sync Error:", err.message);
-        setInitializationError(err.message.includes('not found') ? "Cloud schema mismatch." : "Connection failed.");
+        console.error("Account sync error", err);
       } finally {
         setIsInitialized(true);
         setIsSyncing(false);
       }
     };
-
     syncAccount();
   }, [session]);
 
   const addWorkout = async (newWorkout: Omit<Workout, 'userId' | 'user_id' | 'profile_id'>) => {
-    const { data: { session: freshSession } } = await supabase!.auth.getSession();
-    
-    if (!freshSession || !activeProfile) {
-      setToast({ message: "Please sign in to save", type: 'error' });
+    if (!activeProfile || !session) {
+      setToast({ message: "Authentication required", type: 'error' });
       return;
     }
 
@@ -241,14 +199,12 @@ const App: React.FC = () => {
       id: workoutId, 
       client_id: workoutId,
       profile_id: activeProfile.id,
-      user_id: freshSession.user.id 
+      user_id: session.user.id 
     };
 
-    setIsSyncing(true);
-    
     const dbPayload = {
       entreno_id: workoutId,
-      usuario_id: freshSession.user.id,
+      usuario_id: session.user.id,
       client_id: workoutId,
       nombre_rutina: workoutToSave.title,
       fecha: workoutToSave.date,
@@ -263,23 +219,57 @@ const App: React.FC = () => {
       observaciones: workoutToSave.notes || null
     };
 
+    setIsSyncing(true);
+    console.log("Saving workout...", { 
+      online: navigator.onLine, 
+      userId: session.user.id,
+      workoutId 
+    });
+
     try {
       const { error } = await supabase!.from('entrenos').insert([dbPayload]);
       
       if (error) {
-        // Handle auth/policy errors - do not queue
-        if (error.status === 401 || error.status === 403) throw error;
-        // Network errors or timeout - queue it
-        throw new Error("Network failure");
+        console.error("Supabase Save Error:", {
+          status: error.status,
+          code: error.code,
+          message: error.message
+        });
+
+        // 1. Auth Errors
+        if (error.status === 401 || error.status === 403) {
+          setToast({ message: error.status === 401 ? "Session expired. Please re-login." : "Permission denied.", type: 'error' });
+          setIsSyncing(false);
+          return;
+        }
+
+        // 2. Bad Requests / Validation (400)
+        if (error.status === 400) {
+          setToast({ message: `Save failed: ${error.message}`, type: 'error' });
+          setIsSyncing(false);
+          return;
+        }
+
+        // 3. Any other non-network errors that have a status code (like 500)
+        if (error.status) {
+          setToast({ message: "Server error occurred.", type: 'error' });
+          setIsSyncing(false);
+          return;
+        }
+
+        // 4. If there's an error but no status, it might be a connection drop
+        throw error;
       }
-      
-      setWorkouts([workoutToSave, ...workouts]);
+
+      // Success
+      setWorkouts(prev => [workoutToSave, ...prev]);
       setToast({ message: "Workout synced", type: 'success' });
       setActiveView('dashboard');
     } catch (err: any) {
-      // Offline-first fallback
-      await syncQueue.queueWorkout(workoutToSave);
-      setWorkouts([workoutToSave, ...workouts]);
+      // Local fallback for Network Errors only
+      console.warn("Falling back to local queue due to network failure:", err);
+      await syncQueue.queueWorkout(workoutToSave).catch(() => {});
+      setWorkouts(prev => [workoutToSave, ...prev]);
       setToast({ message: "Saved locally. Syncing later.", type: 'success' });
       setActiveView('dashboard');
     } finally {
@@ -306,21 +296,14 @@ const App: React.FC = () => {
     if (!supabase || !session) return;
     setActiveProfile(updated);
     try {
-      await supabase.from('usuarios').update({
-        name: updated.name,
-        color: updated.color
-      }).eq('usuario_id', session.user.id);
+      await supabase.from('usuarios').update({ name: updated.name, color: updated.color }).eq('usuario_id', session.user.id);
       setToast({ message: "Account updated", type: 'success' });
     } catch (err) { console.error("Profile update error", err); }
   };
 
-  const handleLogout = async () => {
-    if (supabase) await supabase.auth.signOut();
-  };
+  const handleLogout = async () => { if (supabase) await supabase.auth.signOut(); };
 
-  if (isSupabaseConfigured && !session && isInitialized) {
-    return <AuthScreen />;
-  }
+  if (isSupabaseConfigured && !session && isInitialized) return <AuthScreen />;
 
   return (
     <div className="flex flex-col min-h-screen max-w-md mx-auto bg-slate-900 overflow-x-hidden font-sans">
@@ -355,15 +338,6 @@ const App: React.FC = () => {
           <div className="flex flex-col items-center justify-center py-20 gap-4">
             <Loader2 className="text-emerald-500 animate-spin" size={32} />
             <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Identifying Account...</p>
-          </div>
-        ) : initializationError ? (
-          <div className="flex flex-col items-center justify-center py-20 gap-6 text-center">
-            <div className="w-16 h-16 rounded-3xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-500"><Database size={32} /></div>
-            <div>
-              <h2 className="text-lg font-black text-white uppercase tracking-tight">Sync Failure</h2>
-              <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mt-2 px-8 leading-relaxed">{initializationError}</p>
-            </div>
-            <button onClick={() => window.location.reload()} className="px-6 py-3 bg-slate-800 border border-slate-700 rounded-2xl text-[10px] font-black text-white uppercase tracking-widest flex items-center gap-2 active:scale-95 transition-all"><RefreshCw size={14} /> Retry</button>
           </div>
         ) : (
           <>
