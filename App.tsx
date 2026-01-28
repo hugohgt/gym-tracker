@@ -71,10 +71,12 @@ const App: React.FC = () => {
     setIsSyncing(true);
     try {
       for (const item of pending) {
+        // Migration logic: Rename client_id to usuario_id if present (client_id is removed from schema)
+        const workoutUserId = item.usuario_id || item.user_id || session.user.id;
+
         const payload = {
           entreno_id: item.id,
-          usuario_id: session.user.id,
-          client_id: item.client_id || item.id,
+          usuario_id: workoutUserId,
           nombre_rutina: item.title,
           fecha: item.date,
           duracion_minutos: item.duration || 0,
@@ -89,10 +91,16 @@ const App: React.FC = () => {
         };
 
         const { error } = await supabase.from('entrenos').insert([payload]);
+        // If success or duplicate key, remove from local queue
         if (!error || error.code === '23505') {
-          await syncQueue.removeQueuedWorkout(item.client_id || item.id);
+          await syncQueue.removeQueuedWorkout(item.id);
         } else {
           console.error("Sync item failed:", error);
+          // If it's a 400 bad request, we shouldn't retry it indefinitely
+          if (error.status === 400) {
+             console.error("Sync: Invalid data (400) for item", item.id);
+             await syncQueue.removeQueuedWorkout(item.id);
+          }
         }
       }
       
@@ -107,7 +115,6 @@ const App: React.FC = () => {
           const extra = raw.payload || {};
           return {
             id: raw.entreno_id,
-            client_id: raw.client_id,
             user_id: raw.usuario_id,
             profile_id: extra.profile_id || activeProfile?.id, 
             date: raw.fecha,
@@ -121,7 +128,7 @@ const App: React.FC = () => {
         }));
       }
     } catch (e) {
-      console.error("Sync failed", e);
+      console.error("Sync process failed", e);
     } finally {
       setIsSyncing(false);
     }
@@ -164,7 +171,6 @@ const App: React.FC = () => {
           const extra = raw.payload || {};
           return {
             id: raw.entreno_id,
-            client_id: raw.client_id,
             user_id: raw.usuario_id,
             profile_id: extra.profile_id || profile.id, 
             date: raw.fecha,
@@ -187,7 +193,7 @@ const App: React.FC = () => {
     syncAccount();
   }, [session]);
 
-  const addWorkout = async (newWorkout: Omit<Workout, 'userId' | 'user_id' | 'profile_id'>) => {
+  const addWorkout = async (newWorkout: Omit<Workout, 'user_id' | 'profile_id'>) => {
     if (!activeProfile || !session) {
       setToast({ message: "Authentication required", type: 'error' });
       return;
@@ -197,7 +203,6 @@ const App: React.FC = () => {
     const workoutToSave: Workout = { 
       ...newWorkout, 
       id: workoutId, 
-      client_id: workoutId,
       profile_id: activeProfile.id,
       user_id: session.user.id 
     };
@@ -205,7 +210,6 @@ const App: React.FC = () => {
     const dbPayload = {
       entreno_id: workoutId,
       usuario_id: session.user.id,
-      client_id: workoutId,
       nombre_rutina: workoutToSave.title,
       fecha: workoutToSave.date,
       duracion_minutos: workoutToSave.duration || 0,
@@ -220,57 +224,58 @@ const App: React.FC = () => {
     };
 
     setIsSyncing(true);
-    console.log("Saving workout...", { 
+    console.log("Saving workout to Supabase...", { 
       online: navigator.onLine, 
-      userId: session.user.id,
-      workoutId 
+      usuario_id: session.user.id,
+      entreno_id: workoutId 
     });
 
     try {
       const { error } = await supabase!.from('entrenos').insert([dbPayload]);
       
       if (error) {
-        console.error("Supabase Save Error:", {
+        console.error("Supabase Operation Failed:", {
           status: error.status,
           code: error.code,
-          message: error.message
+          message: error.message,
+          details: error.details
         });
 
-        // 1. Auth Errors
+        // Auth Errors
         if (error.status === 401 || error.status === 403) {
-          setToast({ message: error.status === 401 ? "Session expired. Please re-login." : "Permission denied.", type: 'error' });
+          setToast({ message: error.status === 401 ? "Session expired. Re-login." : "Permission denied.", type: 'error' });
           setIsSyncing(false);
           return;
         }
 
-        // 2. Bad Requests / Validation (400)
+        // Schema / Validation Errors (400) - DO NOT label as offline
         if (error.status === 400) {
-          setToast({ message: `Save failed: ${error.message}`, type: 'error' });
+          setToast({ message: `Sync failed (invalid data): ${error.message}`, type: 'error' });
           setIsSyncing(false);
           return;
         }
 
-        // 3. Any other non-network errors that have a status code (like 500)
+        // Other Server Errors
         if (error.status) {
-          setToast({ message: "Server error occurred.", type: 'error' });
+          setToast({ message: `Server error (${error.status})`, type: 'error' });
           setIsSyncing(false);
           return;
         }
 
-        // 4. If there's an error but no status, it might be a connection drop
+        // No status implies a network/offline failure
         throw error;
       }
 
-      // Success
+      // Success Path
       setWorkouts(prev => [workoutToSave, ...prev]);
       setToast({ message: "Workout synced", type: 'success' });
       setActiveView('dashboard');
     } catch (err: any) {
-      // Local fallback for Network Errors only
-      console.warn("Falling back to local queue due to network failure:", err);
+      // Offline fallback for real network issues
+      console.warn("Offline fallback triggered:", err);
       await syncQueue.queueWorkout(workoutToSave).catch(() => {});
       setWorkouts(prev => [workoutToSave, ...prev]);
-      setToast({ message: "Saved locally. Syncing later.", type: 'success' });
+      setToast({ message: "Saved locally. Sync later.", type: 'success' });
       setActiveView('dashboard');
     } finally {
       setIsSyncing(false);
@@ -281,7 +286,7 @@ const App: React.FC = () => {
     if (!supabase || !session) return;
     setIsSyncing(true);
     try {
-      const { error } = await supabase.from('entrenos').delete().eq('entreno_id', id);
+      const { error } = await supabase.from('entrenos').delete().eq('entreno_id', id).eq('usuario_id', session.user.id);
       if (error) throw error;
       setWorkouts(workouts.filter(w => w.id !== id));
       setToast({ message: "Entry removed", type: 'success' });
