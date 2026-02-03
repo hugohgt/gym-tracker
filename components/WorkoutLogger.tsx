@@ -421,7 +421,7 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
 
                 <div className="space-y-3">
                   {ex.sets.map((set, sIdx) => (
-                    <div key={set.id} className={`grid grid-cols-12 items-center gap-2 transition-opacity ${set.completed ? 'opacity-30' : ''}`}>
+                    <div key={set.id} className="grid grid-cols-12 items-center gap-2 transition-opacity">
                       <div className="col-span-1 font-black text-slate-600 text-[10px] text-center">{sIdx + 1}</div>
                       
                       {workoutType === 'strength' ? (
@@ -457,9 +457,8 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
                         </>
                       )}
 
-                      <div className="col-span-3 flex justify-end gap-1">
-                        <button onClick={() => setActiveExercises(prev => prev.map(e => e.id === ex.id ? { ...e, sets: e.sets.filter(s => s.id !== set.id) } : e))} className="p-2 text-slate-800 hover:text-rose-500 transition-colors"><Trash2 size={16} /></button>
-                        <button onClick={() => updateSet(ex.id, set.id, 'completed', !set.completed)} className={`p-2 rounded-xl transition-colors ${set.completed ? 'text-emerald-400 bg-emerald-500/10' : 'text-slate-800 hover:text-emerald-500'}`}><CheckCircle size={22} /></button>
+                      <div className="col-span-3 flex justify-end">
+                        <button onClick={() => setActiveExercises(prev => prev.map(e => e.id === ex.id ? { ...e, sets: e.sets.filter(s => s.id !== set.id) } : e))} className="p-2 text-slate-500 hover:text-rose-500 transition-colors"><Trash2 size={16} /></button>
                       </div>
                     </div>
                   ))}
