@@ -6,6 +6,7 @@ import { X, Plus, Trash2, CheckCircle, Dumbbell, Calendar, Search, Heart, ArrowL
 interface WorkoutLoggerProps {
   onSave: (workout: any) => void;
   editingWorkout?: Workout | null;
+  selectedDate?: string | null;
   onSaveTemplate: (template: Omit<WorkoutTemplate, 'user_id'>) => void;
   onDeleteTemplate?: (id: string) => void;
   onUpdateTemplate?: (id: string, updates: Partial<WorkoutTemplate>) => void;
@@ -21,6 +22,7 @@ interface WorkoutLoggerProps {
 const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({ 
   onSave, 
   editingWorkout,
+  selectedDate,
   onSaveTemplate,
   onCancel, 
   previousWorkouts, 
@@ -32,7 +34,11 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
   const [isSelectingRepeat, setIsSelectingRepeat] = useState(false);
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [title, setTitle] = useState(editingWorkout?.title || '');
-  const [workoutDate, setWorkoutDate] = useState(editingWorkout?.date ? new Date(editingWorkout.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
+  const [workoutDate, setWorkoutDate] = useState(
+    editingWorkout?.date 
+      ? new Date(editingWorkout.date).toISOString().split('T')[0] 
+      : (selectedDate ? new Date(selectedDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0])
+  );
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   
   const [strengthExercises, setStrengthExercises] = useState<Exercise[]>(editingWorkout?.type === 'strength' ? (editingWorkout.exercises || []) : []);

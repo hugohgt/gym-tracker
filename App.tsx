@@ -26,6 +26,7 @@ const App: React.FC = () => {
   const [initializationError, setInitializationError] = useState<string | null>(null);
   const [toast, setToastInternal] = useState<{message: string, type: 'success'|'error', id: number} | null>(null);
   const [historyDateFilter, setHistoryDateFilter] = useState<string | null>(null);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
@@ -388,7 +389,11 @@ const App: React.FC = () => {
           </div>
         ) : (
           <>
-            {activeView === 'dashboard' && <Dashboard workouts={workouts} onNavigate={(v, d) => { if(v === 'history') setHistoryDateFilter(d); setActiveView(v); }} />}
+            {activeView === 'dashboard' && <Dashboard workouts={workouts} onNavigate={(v, d) => { 
+              if(v === 'history') setHistoryDateFilter(d); 
+              if(v === 'log') setSelectedDate(d);
+              setActiveView(v); 
+            }} />}
             {activeView === 'history' && (
               <HistoryView 
                 workouts={workouts} 
@@ -400,10 +405,19 @@ const App: React.FC = () => {
             )}
             {activeView === 'log' && (
               <WorkoutLogger 
-                onSave={editingWorkout ? updateWorkout : addWorkout}
+                onSave={(w) => {
+                  if (editingWorkout) updateWorkout(w);
+                  else addWorkout(w);
+                  setSelectedDate(null);
+                }}
                 editingWorkout={editingWorkout}
+                selectedDate={selectedDate}
                 onSaveTemplate={(t) => setTemplates([...templates, normalizeTemplate({...t, user_id: session?.user?.id})])}
-                onCancel={() => { setEditingWorkout(null); setActiveView('dashboard'); }} 
+                onCancel={() => { 
+                  setEditingWorkout(null); 
+                  setSelectedDate(null);
+                  setActiveView('dashboard'); 
+                }} 
                 previousWorkouts={workouts}
                 templates={templates}
                 availableCategories={customCategories}
