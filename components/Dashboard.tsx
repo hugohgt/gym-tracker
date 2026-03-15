@@ -46,7 +46,8 @@ const Dashboard: React.FC<DashboardProps> = ({ workouts, onNavigate, isNewPR, on
     const endOfMonth = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0);
     
     const days = [];
-    for (let i = 0; i < startOfMonth.getDay(); i++) {
+    const startDay = (startOfMonth.getDay() + 6) % 7;
+    for (let i = 0; i < startDay; i++) {
       days.push(null);
     }
     for (let i = 1; i <= endOfMonth.getDate(); i++) {
@@ -79,8 +80,14 @@ const Dashboard: React.FC<DashboardProps> = ({ workouts, onNavigate, isNewPR, on
   };
 
   const handleDayClick = (date: Date) => {
+    const dateStr = date.getFullYear() + '-' + 
+      String(date.getMonth() + 1).padStart(2, '0') + '-' + 
+      String(date.getDate()).padStart(2, '0');
+    
     if (trainingDays.has(date.toDateString())) {
-      onNavigate('history', date.toISOString());
+      onNavigate('history', dateStr);
+    } else {
+      onNavigate('log', dateStr);
     }
   };
 
@@ -197,7 +204,7 @@ const Dashboard: React.FC<DashboardProps> = ({ workouts, onNavigate, isNewPR, on
         </div>
         
         <div className="grid grid-cols-7 gap-1 text-center">
-          {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map(d => (
+          {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map(d => (
             <div key={d} className="text-[8px] font-black text-slate-600 pb-2">{d}</div>
           ))}
           {calendarDays.map((date, idx) => {

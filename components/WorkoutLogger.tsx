@@ -34,11 +34,18 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
   const [isSelectingRepeat, setIsSelectingRepeat] = useState(false);
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [title, setTitle] = useState(editingWorkout?.title || '');
-  const [workoutDate, setWorkoutDate] = useState(
-    editingWorkout?.date 
-      ? new Date(editingWorkout.date).toISOString().split('T')[0] 
-      : (selectedDate ? new Date(selectedDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0])
-  );
+  const [workoutDate, setWorkoutDate] = useState(() => {
+    if (editingWorkout?.date) {
+      return new Date(editingWorkout.date).toISOString().split('T')[0];
+    }
+    if (selectedDate) {
+      return selectedDate;
+    }
+    const d = new Date();
+    return d.getFullYear() + '-' + 
+      String(d.getMonth() + 1).padStart(2, '0') + '-' + 
+      String(d.getDate()).padStart(2, '0');
+  });
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   
   const [strengthExercises, setStrengthExercises] = useState<Exercise[]>(editingWorkout?.type === 'strength' ? (editingWorkout.exercises || []) : []);
@@ -518,7 +525,8 @@ const DatePickerModal: React.FC<{
     const start = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1);
     const end = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0);
     const days = [];
-    for (let i = 0; i < start.getDay(); i++) days.push(null);
+    const startDay = (start.getDay() + 6) % 7;
+    for (let i = 0; i < startDay; i++) days.push(null);
     for (let i = 1; i <= end.getDate(); i++) days.push(new Date(viewDate.getFullYear(), viewDate.getMonth(), i));
     return days;
   }, [viewDate]);
@@ -535,7 +543,7 @@ const DatePickerModal: React.FC<{
         </header>
 
         <div className="grid grid-cols-7 gap-1 text-center mb-2">
-          {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map(d => (
+          {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map(d => (
             <div key={d} className="text-[9px] font-black text-slate-600 uppercase">{d}</div>
           ))}
         </div>
@@ -547,7 +555,12 @@ const DatePickerModal: React.FC<{
             return (
               <button 
                 key={idx}
-                onClick={() => onSelect(date.toISOString().split('T')[0])}
+                onClick={() => {
+                  const dateStr = date.getFullYear() + '-' + 
+                    String(date.getMonth() + 1).padStart(2, '0') + '-' + 
+                    String(date.getDate()).padStart(2, '0');
+                  onSelect(dateStr);
+                }}
                 className={`aspect-square flex items-center justify-center text-[10px] font-black rounded-xl transition-all ${
                   isSelected ? 'bg-emerald-500 text-slate-950 shadow-lg' : 'text-slate-400 hover:bg-slate-800 hover:text-white'
                 }`}
