@@ -367,6 +367,18 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
             {isSearchFocused && <div className="fixed inset-0 z-[-1]" onClick={() => setIsSearchFocused(false)}></div>}
           </div>
 
+          <div className="flex flex-col items-center">
+            <button 
+              onClick={addNewEmptyExercise}
+              className="w-full bg-slate-800/20 border-2 border-dashed border-slate-700/40 rounded-3xl py-6 flex flex-col items-center justify-center gap-3 transition-all active:scale-[0.98] hover:bg-slate-800/30 group"
+            >
+              <div className="w-10 h-10 rounded-full border-2 border-slate-700 flex items-center justify-center text-slate-500 group-hover:text-emerald-400 group-hover:border-emerald-500/50 transition-colors">
+                <Plus size={20} />
+              </div>
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">ADD EXERCISE</span>
+            </button>
+          </div>
+
           {activeExercises.map((ex) => (
             <div key={ex.id} className="bg-slate-800/30 rounded-[2rem] border border-slate-700/50 overflow-hidden shadow-lg transition-all">
               <div className="p-6 border-b border-slate-700/30 flex justify-between items-center bg-slate-800/10">
@@ -475,18 +487,6 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
               </div>
             </div>
           ))}
-
-          <div className="pt-4 flex flex-col items-center gap-6">
-            <button 
-              onClick={addNewEmptyExercise}
-              className="w-full max-w-sm bg-slate-800/20 border-2 border-dashed border-slate-700/40 rounded-[2.5rem] py-10 flex flex-col items-center justify-center gap-4 transition-all active:scale-[0.98] hover:bg-slate-800/30 group"
-            >
-              <div className="w-14 h-14 rounded-full border-2 border-slate-700 flex items-center justify-center text-slate-500 group-hover:text-emerald-400 group-hover:border-emerald-500/50 transition-colors">
-                <Plus size={28} />
-              </div>
-              <span className="text-xs font-black text-slate-400 uppercase tracking-widest">ADD EXERCISE</span>
-            </button>
-          </div>
         </div>
       </div>
 
