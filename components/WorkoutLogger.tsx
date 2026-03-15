@@ -5,6 +5,7 @@ import { X, Plus, Trash2, CheckCircle, Dumbbell, Calendar, Search, Heart, ArrowL
 
 interface WorkoutLoggerProps {
   onSave: (workout: any) => void;
+  editingWorkout?: Workout | null;
   onSaveTemplate: (template: Omit<WorkoutTemplate, 'user_id'>) => void;
   onDeleteTemplate?: (id: string) => void;
   onUpdateTemplate?: (id: string, updates: Partial<WorkoutTemplate>) => void;
@@ -19,22 +20,23 @@ interface WorkoutLoggerProps {
 
 const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({ 
   onSave, 
+  editingWorkout,
   onSaveTemplate,
   onCancel, 
   previousWorkouts, 
   isSaving = false,
   onToast
 }) => {
-  const [workoutType, setWorkoutType] = useState<WorkoutType | null>(null);
-  const [quality, setQuality] = useState<WorkoutQuality>('normal');
+  const [workoutType, setWorkoutType] = useState<WorkoutType | null>(editingWorkout?.type || null);
+  const [quality, setQuality] = useState<WorkoutQuality>(editingWorkout?.quality || 'normal');
   const [isSelectingRepeat, setIsSelectingRepeat] = useState(false);
   const [isSearchFocused, setIsSearchFocused] = useState(false);
-  const [title, setTitle] = useState('');
-  const [workoutDate, setWorkoutDate] = useState(new Date().toISOString().split('T')[0]);
+  const [title, setTitle] = useState(editingWorkout?.title || '');
+  const [workoutDate, setWorkoutDate] = useState(editingWorkout?.date ? new Date(editingWorkout.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   
-  const [strengthExercises, setStrengthExercises] = useState<Exercise[]>([]);
-  const [cardioExercises, setCardioExercises] = useState<Exercise[]>([]);
+  const [strengthExercises, setStrengthExercises] = useState<Exercise[]>(editingWorkout?.type === 'strength' ? (editingWorkout.exercises || []) : []);
+  const [cardioExercises, setCardioExercises] = useState<Exercise[]>(editingWorkout?.type === 'cardio' ? (editingWorkout.exercises || []) : []);
   
   const [searchTerm, setSearchTerm] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -188,7 +190,7 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
     if (finalExercises.length === 0 || isSaving) return;
 
     onSave({
-      id: crypto.randomUUID(),
+      id: editingWorkout?.id || crypto.randomUUID(),
       date: new Date(workoutDate).toISOString(),
       title,
       type: workoutType!,
@@ -296,7 +298,12 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
           </button>
           
           <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-            <h1 className="text-[15px] font-black text-white uppercase tracking-tight leading-none">{title}</h1>
+            <div className="flex flex-col items-center">
+              {editingWorkout && (
+                <span className="text-[7px] font-black text-emerald-400 uppercase tracking-[0.2em] mb-0.5">EDITING PAST SESSION</span>
+              )}
+              <h1 className="text-[15px] font-black text-white uppercase tracking-tight leading-none">{title}</h1>
+            </div>
             <div className="flex items-center gap-1.5 mt-1 text-slate-500 pointer-events-auto">
               <button 
                 onClick={() => setIsDatePickerOpen(true)} 

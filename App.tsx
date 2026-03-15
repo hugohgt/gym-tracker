@@ -18,6 +18,7 @@ const App: React.FC = () => {
   const [session, setSession] = useState<any>(null);
   const [activeView, setActiveView] = useState<ViewType>('dashboard');
   const [workouts, setWorkouts] = useState<Workout[]>([]);
+  const [editingWorkout, setEditingWorkout] = useState<Workout | null>(null);
   const [templates, setTemplates] = useState<WorkoutTemplate[]>([]);
   const [activeProfile, setActiveProfile] = useState<UserProfile | null>(null);
   const [customCategories, setCustomCategories] = useState<string[]>([]);
@@ -298,6 +299,46 @@ const App: React.FC = () => {
     }
   };
 
+  const updateWorkout = async (updatedWorkout: Workout) => {
+    if (!activeProfile || !session || !supabase) {
+      setToast({ message: "Authentication required", type: 'error' });
+      return;
+    }
+
+    const fullData = {
+      exercises: updatedWorkout.exercises,
+      type: updatedWorkout.type,
+      quality: updatedWorkout.quality,
+      notes: updatedWorkout.notes,
+      profile_id: activeProfile.id 
+    };
+
+    const dbPayload = {
+      nombre_rutina: updatedWorkout.title,
+      fecha: updatedWorkout.date,
+      duracion_minutos: updatedWorkout.duration || 0,
+      payload: fullData,
+      observaciones: fullData
+    };
+
+    setIsSyncing(true);
+    try {
+      const { error } = await supabase.from('entrenos').update(dbPayload).eq('entreno_id', updatedWorkout.id).eq('usuario_id', session.user.id);
+      
+      if (error) throw error;
+
+      setWorkouts(prev => prev.map(w => w.id === updatedWorkout.id ? updatedWorkout : w));
+      setToast({ message: "Session updated", type: 'success' });
+      setEditingWorkout(null);
+      setActiveView('dashboard');
+    } catch (err: any) {
+      console.error("Update failed:", err);
+      setToast({ message: "Update failed", type: 'error' });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const handleUpdateProfile = async (updated: UserProfile) => {
     if (!supabase || !session) return;
     setActiveProfile(updated);
@@ -348,12 +389,21 @@ const App: React.FC = () => {
         ) : (
           <>
             {activeView === 'dashboard' && <Dashboard workouts={workouts} onNavigate={(v, d) => { if(v === 'history') setHistoryDateFilter(d); setActiveView(v); }} />}
-            {activeView === 'history' && <HistoryView workouts={workouts} onDelete={deleteWorkout} dateFilter={historyDateFilter} onClearFilter={() => setHistoryDateFilter(null)} />}
+            {activeView === 'history' && (
+              <HistoryView 
+                workouts={workouts} 
+                onDelete={deleteWorkout} 
+                onEdit={(w) => { setEditingWorkout(w); setActiveView('log'); }}
+                dateFilter={historyDateFilter} 
+                onClearFilter={() => setHistoryDateFilter(null)} 
+              />
+            )}
             {activeView === 'log' && (
               <WorkoutLogger 
-                onSave={addWorkout}
+                onSave={editingWorkout ? updateWorkout : addWorkout}
+                editingWorkout={editingWorkout}
                 onSaveTemplate={(t) => setTemplates([...templates, normalizeTemplate({...t, user_id: session?.user?.id})])}
-                onCancel={() => setActiveView('dashboard')} 
+                onCancel={() => { setEditingWorkout(null); setActiveView('dashboard'); }} 
                 previousWorkouts={workouts}
                 templates={templates}
                 availableCategories={customCategories}

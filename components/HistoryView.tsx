@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo } from 'react';
 import { Workout, WorkoutType } from '../types';
 import { ChevronDown, ChevronUp, Trash2, Calendar, Clock, Dumbbell, Heart, Sparkles, Timer, Tag, AlertTriangle, X, Trophy, Filter } from 'lucide-react';
@@ -6,11 +5,12 @@ import { ChevronDown, ChevronUp, Trash2, Calendar, Clock, Dumbbell, Heart, Spark
 interface HistoryViewProps {
   workouts: Workout[];
   onDelete: (id: string) => void;
+  onEdit: (workout: Workout) => void;
   dateFilter?: string | null;
   onClearFilter?: () => void;
 }
 
-const HistoryView: React.FC<HistoryViewProps> = ({ workouts, onDelete, dateFilter, onClearFilter }) => {
+const HistoryView: React.FC<HistoryViewProps> = ({ workouts, onDelete, onEdit, dateFilter, onClearFilter }) => {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [workoutToDelete, setWorkoutToDelete] = useState<Workout | null>(null);
 
@@ -101,7 +101,9 @@ const HistoryView: React.FC<HistoryViewProps> = ({ workouts, onDelete, dateFilte
       )}
 
       {filteredWorkouts.map((workout) => {
-        const safePayload = workout.payload ?? {};
+        // Fix: Cast to any to safely access potentially present legacy 'payload' property
+        const workoutAny = workout as any;
+        const safePayload = workoutAny.payload ?? {};
         const exercises = safePayload.exercises ?? workout.exercises ?? [];
         
         return (
@@ -134,7 +136,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ workouts, onDelete, dateFilte
 
             {expandedId === workout.id && (
               <div className="p-5 border-t border-slate-700 bg-slate-900/30 space-y-6 animate-in slide-in-from-top-2 duration-300">
-                {exercises.length > 0 ? exercises.map((ex, idx) => (
+                {exercises.length > 0 ? exercises.map((ex: any, idx: number) => (
                   <div key={idx} className="space-y-3">
                     <div className="flex items-center justify-between">
                       <h4 className="text-xs font-black text-slate-100 flex items-center gap-2 uppercase tracking-tight">
@@ -151,14 +153,14 @@ const HistoryView: React.FC<HistoryViewProps> = ({ workouts, onDelete, dateFilte
                     
                     {ex.tags && ex.tags.length > 0 && (
                       <div className="flex gap-1 pl-3">
-                        {ex.tags.map(tag => (
+                        {ex.tags.map((tag: string) => (
                           <span key={tag} className="text-[7px] text-slate-500 bg-slate-800 px-1.5 py-0.5 rounded-md font-bold uppercase">{tag}</span>
                         ))}
                       </div>
                     )}
 
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pl-3">
-                      {ex.sets.map((s, sIdx) => (
+                      {ex.sets.map((s: any, sIdx: number) => (
                         <div key={sIdx} className="bg-slate-800/80 p-2.5 rounded-2xl text-center border border-slate-700/50 flex flex-col justify-center min-h-[55px] shadow-sm">
                           {workout.type === 'strength' && (
                             <>
@@ -201,7 +203,16 @@ const HistoryView: React.FC<HistoryViewProps> = ({ workouts, onDelete, dateFilte
                      <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest">No detailed exercise data found for this entry.</p>
                   </div>
                 )}
-                <div className="pt-4 border-t border-slate-800 flex justify-end">
+                <div className="pt-4 border-t border-slate-800 flex justify-end gap-3">
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEdit(workout);
+                    }}
+                    className="text-[10px] font-black text-emerald-400 hover:text-emerald-300 flex items-center gap-1.5 uppercase tracking-widest transition-colors py-2 px-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20"
+                  >
+                    Edit Entry
+                  </button>
                   <button 
                     onClick={(e) => {
                       e.stopPropagation();
@@ -226,8 +237,8 @@ const HistoryView: React.FC<HistoryViewProps> = ({ workouts, onDelete, dateFilte
               <div className="w-16 h-16 rounded-3xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-500 mb-6">
                 <AlertTriangle size={32} />
               </div>
-              <h2 className="text-xl font-black text-white uppercase tracking-tighter mb-2">Delete workout?</h2>
-              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-6">This action can’t be undone.</p>
+              <h2 className="text-xl font-black text-white uppercase tracking-tighter mb-2">Delete entry?</h2>
+              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-6">This action cannot be undone.</p>
               
               <div className="w-full bg-slate-950/50 rounded-2xl p-4 border border-slate-800/50 mb-8 text-left">
                 <p className="text-[8px] font-black text-slate-600 uppercase tracking-widest mb-1">Workout Details</p>
@@ -240,7 +251,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ workouts, onDelete, dateFilte
                   onClick={handleConfirmDelete}
                   className="w-full py-4 bg-red-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest active:scale-95 transition-all shadow-lg shadow-red-500/20"
                 >
-                  Delete Session
+                  Delete
                 </button>
                 <button 
                   onClick={() => setWorkoutToDelete(null)}
