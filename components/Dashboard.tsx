@@ -204,8 +204,8 @@ const Dashboard: React.FC<DashboardProps> = ({ workouts, onNavigate, isNewPR, on
         </div>
         
         <div className="grid grid-cols-7 gap-1 text-center">
-          {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map(d => (
-            <div key={d} className="text-[8px] font-black text-slate-600 pb-2">{d}</div>
+          {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, index) => (
+            <div key={`weekday-${index}`} className="text-[8px] font-black text-slate-600 pb-2">{d}</div>
           ))}
           {calendarDays.map((date, idx) => {
             if (!date) return <div key={`empty-${idx}`} />;

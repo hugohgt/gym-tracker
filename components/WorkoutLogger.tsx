@@ -543,8 +543,8 @@ const DatePickerModal: React.FC<{
         </header>
 
         <div className="grid grid-cols-7 gap-1 text-center mb-2">
-          {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map(d => (
-            <div key={d} className="text-[9px] font-black text-slate-600 uppercase">{d}</div>
+          {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, index) => (
+            <div key={`modal-weekday-${index}`} className="text-[9px] font-black text-slate-600 uppercase">{d}</div>
           ))}
         </div>
 
