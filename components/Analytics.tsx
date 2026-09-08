@@ -3,7 +3,6 @@ import React, { useState, useMemo } from 'react';
 import { Workout, Exercise, WorkoutType } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, Cell, AreaChart, Area, PieChart, Pie } from 'recharts';
 import { Activity, Zap, TrendingUp, ChevronDown, Award, Calendar, ChevronRight, List, History as HistoryIcon, X, Dumbbell, Heart, Sparkles, Clock, ArrowUp, ArrowDown, Lightbulb, Trophy, Filter, PieChart as PieChartIcon, Info } from 'lucide-react';
-import { BodyHeatmap, FocusLevel } from './BodyHeatmap';
 
 interface AnalyticsProps {
   workouts: Workout[];
@@ -49,6 +48,16 @@ export const MUSCLE_COLORS: Record<PrimaryMuscleGroup, string> = {
   Calves: '#06b6d4',     // Cyan
   Core: '#64748b'        // Slate Grey
 };
+
+export function isWorkingSet(s: any): boolean {
+  if (!s) return false;
+  if (s.completed) return true;
+  const reps = Number(s.metricValue ?? s.reps ?? 0);
+  const weight = Number(s.weight ?? 0);
+  const time = Number(s.time ?? s.holdTime ?? 0);
+  const distance = Number(s.distance ?? 0);
+  return reps > 0 || weight > 0 || time > 0 || distance > 0;
+}
 
 export function getPrimaryMuscleGroup(exercise: { name: string; category?: string; tags?: string[] }): PrimaryMuscleGroup {
   const cat = (exercise.category || '').toLowerCase();
@@ -234,7 +243,9 @@ const Analytics: React.FC<AnalyticsProps> = ({ workouts }) => {
   const { currentWorkingSets, compWorkingSets } = useMemo(() => {
     const countSets = (list: Workout[]) => {
       return list.reduce((total, w) => {
-        return total + w.exercises.reduce((exTotal, ex) => exTotal + ex.sets.length, 0);
+        return total + w.exercises.reduce((exTotal, ex) => {
+          return exTotal + (ex.sets ? ex.sets.filter(isWorkingSet).length : 0);
+        }, 0);
       }, 0);
     };
 
@@ -264,7 +275,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ workouts }) => {
     currentWorkouts.forEach(w => {
       w.exercises.forEach(ex => {
         const primaryGroup = getPrimaryMuscleGroup(ex);
-        const setCount = ex.sets.length;
+        const setCount = ex.sets ? ex.sets.filter(isWorkingSet).length : 0;
         counts[primaryGroup] += setCount;
         totalWorkingSets += setCount;
       });
@@ -317,39 +328,6 @@ const Analytics: React.FC<AnalyticsProps> = ({ workouts }) => {
         color: MUSCLE_COLORS[group]
       };
     }).filter(item => item.sets > 0);
-  }, [muscleDistribution]);
-
-  // Visual Focus levels for anatomical body heatmap
-  const muscleFocus = useMemo(() => {
-    const focus: Record<PrimaryMuscleGroup, FocusLevel> = {
-      Chest: 'lower',
-      Back: 'lower',
-      Shoulders: 'lower',
-      Biceps: 'lower',
-      Triceps: 'lower',
-      Quads: 'lower',
-      Hamstrings: 'lower',
-      Glutes: 'lower',
-      Calves: 'lower',
-      Core: 'lower'
-    };
-
-    if (muscleDistribution.totalWorkingSets === 0) return focus;
-
-    PRIMARY_MUSCLE_GROUPS.forEach(group => {
-      const item = muscleDistribution.data.find(d => d.name === group);
-      if (!item || item.sets === 0) {
-        focus[group] = 'lower';
-      } else if (item.percentage >= 13) {
-        focus[group] = 'higher';
-      } else if (item.percentage >= 5) {
-        focus[group] = 'moderate';
-      } else {
-        focus[group] = 'lower';
-      }
-    });
-
-    return focus;
   }, [muscleDistribution]);
 
   // Custom outside percentage label renderer on donut slices
@@ -746,23 +724,6 @@ const Analytics: React.FC<AnalyticsProps> = ({ workouts }) => {
             </div>
           </div>
 
-          {/* Card 2: Muscle Focus Heatmap */}
-          <div className="bg-[#0b1320] border border-slate-800/80 p-5 rounded-[2rem] shadow-xl">
-            <div className="flex items-center gap-2.5 mb-2">
-              <div className="w-7 h-7 rounded-lg bg-teal-500/10 border border-teal-500/30 flex items-center justify-center text-teal-400 shrink-0">
-                <Activity size={14} />
-              </div>
-              <div>
-                <h3 className="text-sm font-black text-white uppercase tracking-wider">MUSCLE FOCUS</h3>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
-                  VISUAL OVERVIEW · {rangeLabel}
-                </p>
-              </div>
-            </div>
-
-            <BodyHeatmap muscleFocus={muscleFocus} />
-          </div>
-
           {/* Summary Stats (Sessions & Working Sets) */}
           <div className="bg-[#0b1320] border border-slate-800/80 p-5 rounded-[2rem] shadow-xl">
             <div className="flex justify-between items-center mb-4">
@@ -1008,13 +969,11 @@ const Analytics: React.FC<AnalyticsProps> = ({ workouts }) => {
                 <strong className="text-white">Muscle Distribution:</strong> Shows the proportion of completed working sets allocated across each primary muscle group for the selected period.
               </p>
               <p>
-                <strong className="text-white">Muscle Focus:</strong> Evaluates your training stimulus across your body:
+                Each exercise is assigned to its primary muscle group, and the percentage is calculated as:
               </p>
-              <ul className="list-disc pl-4 space-y-1 text-slate-400">
-                <li><span className="text-[#00f5c4] font-semibold">Higher Focus:</span> ≥ 13% of completed sets</li>
-                <li><span className="text-[#0d9488] font-semibold">Moderate:</span> 5% - 12% of completed sets</li>
-                <li><span className="text-slate-500 font-semibold">Lower Focus:</span> &lt; 5% or not yet stimulated</li>
-              </ul>
+              <p className="font-mono text-[11px] text-emerald-400 bg-slate-900/80 p-2.5 rounded-xl border border-slate-800 text-center">
+                (Muscle Working Sets ÷ Total Working Sets) × 100
+              </p>
             </div>
             <button
               onClick={() => setShowInfoModal(false)}
