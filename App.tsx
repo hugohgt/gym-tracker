@@ -10,6 +10,7 @@ import Analytics from './components/Analytics';
 import TimerView from './components/TimerView';
 import ProfileSwitcher from './components/ProfileSwitcher';
 import { AuthScreen } from './components/AuthScreen';
+import { ResetPasswordScreen } from './components/ResetPasswordScreen';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
 import { normalizeWorkout, normalizeTemplate } from './storage/appStorage';
 import * as syncQueue from './storage/syncQueue';
@@ -29,6 +30,14 @@ const App: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [isResetPassword, setIsResetPassword] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const hash = window.location.hash || '';
+      const search = window.location.search || '';
+      return hash.includes('type=recovery') || search.includes('type=recovery');
+    }
+    return false;
+  });
 
   const setToast = useCallback((t: {message: string, type: 'success' | 'error'} | null) => {
     if (!t) { setToastInternal(null); return; }
@@ -50,6 +59,9 @@ const App: React.FC = () => {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, newSession) => {
       setSession(newSession);
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsResetPassword(true);
+      }
       if (event === 'SIGNED_OUT') {
         setWorkouts([]);
         setTemplates([]);
@@ -350,6 +362,26 @@ const App: React.FC = () => {
   };
 
   const handleLogout = async () => { if (supabase) await supabase.auth.signOut(); };
+
+  if (isResetPassword) {
+    return (
+      <ResetPasswordScreen 
+        onComplete={() => {
+          setIsResetPassword(false);
+          if (typeof window !== 'undefined' && window.location.hash && window.location.hash.includes('type=recovery')) {
+            window.history.replaceState(null, '', window.location.pathname);
+          }
+          setToast({ message: "Password updated successfully", type: 'success' });
+        }}
+        onCancel={() => {
+          setIsResetPassword(false);
+          if (typeof window !== 'undefined' && window.location.hash && window.location.hash.includes('type=recovery')) {
+            window.history.replaceState(null, '', window.location.pathname);
+          }
+        }}
+      />
+    );
+  }
 
   if (isSupabaseConfigured && !session && isInitialized) return <AuthScreen />;
 
