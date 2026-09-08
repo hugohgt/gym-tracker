@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Workout, Exercise, Set as WorkoutSet, WorkoutType, WorkoutTemplate, WorkoutQuality } from '../types';
-import { X, Plus, Trash2, CheckCircle, Dumbbell, Calendar, Search, Heart, ArrowLeft, ChevronRight, ChevronLeft, Loader2, Star, Info, Clock, Copy } from 'lucide-react';
+import { X, Plus, Trash2, CheckCircle, Dumbbell, Calendar, Search, Heart, ArrowLeft, ChevronRight, ChevronLeft, Loader2, Star, Info, Clock, Copy, GripVertical } from 'lucide-react';
 
 interface WorkoutLoggerProps {
   onSave: (workout: any) => void;
@@ -51,6 +51,10 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
   const [strengthExercises, setStrengthExercises] = useState<Exercise[]>(editingWorkout?.type === 'strength' ? (editingWorkout.exercises || []) : []);
   const [cardioExercises, setCardioExercises] = useState<Exercise[]>(editingWorkout?.type === 'cardio' ? (editingWorkout.exercises || []) : []);
   
+  const [draggedId, setDraggedId] = useState<string | null>(null);
+  const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
   const [searchTerm, setSearchTerm] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -61,6 +65,78 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
       setStrengthExercises(update);
     } else if (workoutType === 'cardio') {
       setCardioExercises(update);
+    }
+  };
+
+  // Ensure dragged state resets cleanly if pointer is released anywhere
+  useEffect(() => {
+    if (!draggedId) return;
+    const handleGlobalPointerUp = () => setDraggedId(null);
+    window.addEventListener('pointerup', handleGlobalPointerUp);
+    window.addEventListener('pointercancel', handleGlobalPointerUp);
+    return () => {
+      window.removeEventListener('pointerup', handleGlobalPointerUp);
+      window.removeEventListener('pointercancel', handleGlobalPointerUp);
+    };
+  }, [draggedId]);
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLButtonElement>, exId: string) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {}
+    setDraggedId(exId);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (!draggedId) return;
+
+    if (scrollContainerRef.current) {
+      const containerRect = scrollContainerRef.current.getBoundingClientRect();
+      const topEdge = containerRect.top + 70;
+      const bottomEdge = containerRect.bottom - 70;
+      if (e.clientY < topEdge) {
+        scrollContainerRef.current.scrollBy({ top: -8, behavior: 'auto' });
+      } else if (e.clientY > bottomEdge) {
+        scrollContainerRef.current.scrollBy({ top: 8, behavior: 'auto' });
+      }
+    }
+
+    const currentIdx = activeExercises.findIndex(ex => ex.id === draggedId);
+    if (currentIdx === -1) return;
+
+    let closestIdx = currentIdx;
+    let minDistance = Infinity;
+
+    for (let i = 0; i < activeExercises.length; i++) {
+      const el = cardRefs.current.get(activeExercises[i].id);
+      if (!el) continue;
+      const rect = el.getBoundingClientRect();
+      const midY = rect.top + rect.height / 2;
+      const dist = Math.abs(e.clientY - midY);
+      if (dist < minDistance) {
+        minDistance = dist;
+        closestIdx = i;
+      }
+    }
+
+    if (closestIdx !== currentIdx) {
+      setActiveExercises(prev => {
+        const list = [...prev];
+        const [movedItem] = list.splice(currentIdx, 1);
+        list.splice(closestIdx, 0, movedItem);
+        return list;
+      });
+    }
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (draggedId) {
+      try {
+        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+      } catch {}
+      setDraggedId(null);
     }
   };
 
@@ -197,8 +273,7 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
   const handleSave = () => {
     const finalExercises = activeExercises
       .filter(ex => ex.name.trim() !== '')
-      .map(ex => ({ ...ex, isNaming: false }))
-      .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+      .map(ex => ({ ...ex, isNaming: false }));
 
     if (finalExercises.length === 0 || isSaving) return;
 
@@ -229,8 +304,7 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
   };
 
   const getDisplayNumber = (ex: Exercise) => {
-    const chronological = [...activeExercises].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
-    return chronological.findIndex(e => e.id === ex.id) + 1;
+    return activeExercises.findIndex(e => e.id === ex.id) + 1;
   };
 
   const getRPEStyle = (rpe?: number) => {
@@ -346,7 +420,7 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto no-scrollbar">
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto no-scrollbar">
         <div className="max-w-md mx-auto w-full p-4 space-y-6 pb-40">
           <div className="relative z-[50]">
             <div className={`flex items-center gap-3 bg-slate-800/20 border ${isSearchFocused ? 'border-emerald-500/50' : 'border-slate-800'} rounded-2xl px-5 py-3.5 shadow-lg transition-colors`}>
@@ -393,7 +467,18 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
           </div>
 
           {activeExercises.map((ex) => (
-            <div key={ex.id} className="bg-slate-800/30 rounded-[2rem] border border-slate-700/50 overflow-hidden shadow-lg transition-all">
+            <div 
+              key={ex.id} 
+              ref={(el) => {
+                if (el) cardRefs.current.set(ex.id, el);
+                else cardRefs.current.delete(ex.id);
+              }}
+              className={`bg-slate-800/30 rounded-[2rem] border overflow-hidden shadow-lg transition-all ${
+                draggedId === ex.id 
+                  ? 'border-emerald-500/60 ring-2 ring-emerald-500/30 bg-slate-800/70 shadow-2xl scale-[1.01] z-20 relative' 
+                  : 'border-slate-700/50'
+              }`}
+            >
               <div className="p-6 border-b border-slate-700/30 flex justify-between items-center bg-slate-800/10">
                 <div className="flex items-center gap-3 flex-1">
                   <div className="w-8 h-8 rounded-full border border-slate-700 flex items-center justify-center text-[10px] font-black text-slate-500">{getDisplayNumber(ex)}</div>
@@ -409,7 +494,31 @@ const WorkoutLogger: React.FC<WorkoutLoggerProps> = ({
                     <p className="font-black uppercase tracking-tight text-emerald-400 text-base">{ex.name}</p>
                   )}
                 </div>
-                <button onClick={() => setActiveExercises(prev => prev.filter(e => e.id !== ex.id))} className="text-slate-700 hover:text-rose-500 transition-colors p-1"><Trash2 size={20} /></button>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onPointerDown={(e) => handlePointerDown(e, ex.id)}
+                    onPointerMove={handlePointerMove}
+                    onPointerUp={handlePointerUp}
+                    onPointerCancel={handlePointerUp}
+                    className={`p-1.5 rounded-lg text-slate-500 hover:text-slate-300 active:text-emerald-400 transition-colors cursor-grab active:cursor-grabbing touch-none select-none ${
+                      draggedId === ex.id ? 'text-emerald-400 bg-emerald-500/10' : ''
+                    }`}
+                    title="Drag to reorder"
+                    aria-label="Drag to reorder exercise"
+                  >
+                    <GripVertical size={18} />
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => setActiveExercises(prev => prev.filter(e => e.id !== ex.id))} 
+                    className="text-slate-700 hover:text-rose-500 transition-colors p-1"
+                    title="Delete exercise"
+                    aria-label="Delete exercise"
+                  >
+                    <Trash2 size={20} />
+                  </button>
+                </div>
               </div>
               
               <div className="p-6 space-y-6">
