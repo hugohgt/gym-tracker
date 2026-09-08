@@ -2,7 +2,8 @@
 import React, { useState, useMemo } from 'react';
 import { Workout, Exercise, WorkoutType } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, Cell, AreaChart, Area, PieChart, Pie } from 'recharts';
-import { Activity, Zap, TrendingUp, ChevronDown, Award, Calendar, ChevronRight, List, History as HistoryIcon, X, Dumbbell, Heart, Sparkles, Clock, ArrowUp, ArrowDown, Lightbulb, Trophy, Filter, PieChart as PieChartIcon } from 'lucide-react';
+import { Activity, Zap, TrendingUp, ChevronDown, Award, Calendar, ChevronRight, List, History as HistoryIcon, X, Dumbbell, Heart, Sparkles, Clock, ArrowUp, ArrowDown, Lightbulb, Trophy, Filter, PieChart as PieChartIcon, Info } from 'lucide-react';
+import { BodyHeatmap, FocusLevel } from './BodyHeatmap';
 
 interface AnalyticsProps {
   workouts: Workout[];
@@ -23,7 +24,7 @@ export type PrimaryMuscleGroup =
   | 'Calves'
   | 'Core';
 
-const PRIMARY_MUSCLE_GROUPS: PrimaryMuscleGroup[] = [
+export const PRIMARY_MUSCLE_GROUPS: PrimaryMuscleGroup[] = [
   'Chest',
   'Back',
   'Shoulders',
@@ -36,17 +37,17 @@ const PRIMARY_MUSCLE_GROUPS: PrimaryMuscleGroup[] = [
   'Core'
 ];
 
-const MUSCLE_COLORS: Record<PrimaryMuscleGroup, string> = {
-  Chest: '#10b981',      // Emerald 500
-  Back: '#06b6d4',       // Cyan 500
-  Shoulders: '#14b8a6',  // Teal 500
-  Biceps: '#38bdf8',     // Sky 400
-  Triceps: '#34d399',    // Emerald 400
-  Quads: '#22d3ee',      // Cyan 400
-  Hamstrings: '#2dd4bf', // Teal 400
-  Glutes: '#818cf8',     // Indigo 400
-  Calves: '#67e8f9',     // Cyan 300
-  Core: '#94a3b8'        // Slate 400
+export const MUSCLE_COLORS: Record<PrimaryMuscleGroup, string> = {
+  Chest: '#ff5c5c',      // Coral Red
+  Back: '#3b82f6',       // Royal Blue
+  Shoulders: '#f97316',  // Orange
+  Biceps: '#22c55e',     // Bright Green
+  Triceps: '#facc15',    // Yellow
+  Quads: '#a855f7',      // Purple
+  Hamstrings: '#6366f1', // Indigo
+  Glutes: '#ec4899',     // Pink
+  Calves: '#06b6d4',     // Cyan
+  Core: '#64748b'        // Slate Grey
 };
 
 export function getPrimaryMuscleGroup(exercise: { name: string; category?: string; tags?: string[] }): PrimaryMuscleGroup {
@@ -132,13 +133,14 @@ export function getPrimaryMuscleGroup(exercise: { name: string; category?: strin
 
 const Analytics: React.FC<AnalyticsProps> = ({ workouts }) => {
   // Filters
-  const [strengthTimeRange, setStrengthTimeRange] = useState<StrengthTimeRange>('this_week');
+  const [strengthTimeRange, setStrengthTimeRange] = useState<StrengthTimeRange>('all_time');
   const [cardioTimeRange, setCardioTimeRange] = useState<CardioTimeRange>('7d');
   const [activityType, setActivityType] = useState<WorkoutType>('strength');
   
   // Existing view states
   const [selectedExercise, setSelectedExercise] = useState<string>('');
   const [aggregationType, setAggregationType] = useState<'weekly' | 'total'>('weekly');
+  const [showInfoModal, setShowInfoModal] = useState(false);
 
   // Core Filtering Logic
   const { currentWorkouts, comparisonWorkouts, rangeStart, rangeEnd, rangeLabel } = useMemo(() => {
@@ -284,6 +286,94 @@ const Analytics: React.FC<AnalyticsProps> = ({ workouts }) => {
 
     return { data, totalWorkingSets };
   }, [currentWorkouts]);
+
+  // All 10 muscle groups in canonical order for right-side legend
+  const allMuscleDisplayList = useMemo(() => {
+    return PRIMARY_MUSCLE_GROUPS.map(group => {
+      const item = muscleDistribution.data.find(d => d.name === group);
+      const sets = item ? item.sets : 0;
+      const percentage = item ? Math.round(item.percentage) : 0;
+      return {
+        name: group,
+        sets,
+        percentage,
+        formattedPercentage: percentage,
+        color: MUSCLE_COLORS[group]
+      };
+    });
+  }, [muscleDistribution]);
+
+  // Slices for Donut Chart in canonical order
+  const donutChartData = useMemo(() => {
+    if (muscleDistribution.totalWorkingSets === 0) {
+      return [{ name: 'No Data', sets: 1, percentage: 0, color: '#1e293b' }];
+    }
+    return PRIMARY_MUSCLE_GROUPS.map(group => {
+      const item = muscleDistribution.data.find(d => d.name === group);
+      return {
+        name: group,
+        sets: item ? item.sets : 0,
+        percentage: item ? item.percentage : 0,
+        color: MUSCLE_COLORS[group]
+      };
+    }).filter(item => item.sets > 0);
+  }, [muscleDistribution]);
+
+  // Visual Focus levels for anatomical body heatmap
+  const muscleFocus = useMemo(() => {
+    const focus: Record<PrimaryMuscleGroup, FocusLevel> = {
+      Chest: 'lower',
+      Back: 'lower',
+      Shoulders: 'lower',
+      Biceps: 'lower',
+      Triceps: 'lower',
+      Quads: 'lower',
+      Hamstrings: 'lower',
+      Glutes: 'lower',
+      Calves: 'lower',
+      Core: 'lower'
+    };
+
+    if (muscleDistribution.totalWorkingSets === 0) return focus;
+
+    PRIMARY_MUSCLE_GROUPS.forEach(group => {
+      const item = muscleDistribution.data.find(d => d.name === group);
+      if (!item || item.sets === 0) {
+        focus[group] = 'lower';
+      } else if (item.percentage >= 13) {
+        focus[group] = 'higher';
+      } else if (item.percentage >= 5) {
+        focus[group] = 'moderate';
+      } else {
+        focus[group] = 'lower';
+      }
+    });
+
+    return focus;
+  }, [muscleDistribution]);
+
+  // Custom outside percentage label renderer on donut slices
+  const renderCustomizedLabel = (props: any) => {
+    const { cx, cy, midAngle, outerRadius, percentage, color, name } = props;
+    if (!percentage || percentage < 2.5 || name === 'No Data') return null;
+    const RADIAN = Math.PI / 180;
+    const radius = outerRadius + 14;
+    const x = cx + radius * Math.cos(-midAngle * RADIAN);
+    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+
+    return (
+      <text
+        x={x}
+        y={y}
+        fill={color}
+        textAnchor={x > cx ? 'start' : 'end'}
+        dominantBaseline="central"
+        className="text-[10px] font-black pointer-events-none"
+      >
+        {`${Math.round(percentage)}%`}
+      </text>
+    );
+  };
 
   // Summary Stats based on filtered range (Retains Cardio Volume logic intact)
   const rangeStats = useMemo(() => {
@@ -474,54 +564,70 @@ const Analytics: React.FC<AnalyticsProps> = ({ workouts }) => {
   }
 
   return (
-    <div className="space-y-8 pb-20 relative">
-      {/* Primary Filters */}
+    <div className="space-y-6 pb-20 relative">
+      {/* Primary Header & Filters matching design */}
       <div className="flex flex-col gap-4">
-        <div className="flex justify-between items-center">
-          <h2 className="text-xl font-bold flex items-center gap-2">
-            <Activity className="text-emerald-400" />
-            Performance
-          </h2>
-          <div className="flex bg-slate-800/80 p-1 rounded-xl border border-slate-700/60 shadow-sm">
+        <div className="flex justify-between items-start">
+          <div>
+            <h1 className="text-2xl font-black text-white tracking-wider">STATS</h1>
+            <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
+              YOUR TRAINING OVER TIME
+            </p>
+          </div>
+          <div className="flex bg-[#0b1320] p-1 rounded-2xl border border-slate-800">
             <button 
               onClick={() => setActivityType('strength')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-black rounded-lg transition-all ${activityType === 'strength' ? 'bg-emerald-500 text-slate-900 shadow-md' : 'text-slate-500'}`}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 text-[10px] font-black rounded-xl transition-all ${
+                activityType === 'strength' 
+                  ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20' 
+                  : 'text-slate-400 hover:text-slate-300'
+              }`}
             >
-              <Dumbbell size={12} /> STRENGTH
+              <Dumbbell size={13} /> STRENGTH
             </button>
             <button 
               onClick={() => setActivityType('cardio')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-black rounded-lg transition-all ${activityType === 'cardio' ? 'bg-cyan-500 text-slate-900 shadow-md' : 'text-slate-500'}`}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 text-[10px] font-black rounded-xl transition-all ${
+                activityType === 'cardio' 
+                  ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20' 
+                  : 'text-slate-400 hover:text-slate-300'
+              }`}
             >
-              <Heart size={12} /> CARDIO
+              <Heart size={13} /> CARDIO
             </button>
           </div>
         </div>
 
         {/* Time Filters */}
-        <div className="flex bg-slate-800/40 p-1 rounded-2xl border border-slate-700/40">
+        <div className="flex bg-[#0b1320] p-1 rounded-2xl border border-slate-800 gap-1">
           {activityType === 'strength' ? (
             <>
               <button
                 onClick={() => setStrengthTimeRange('this_week')}
-                className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
-                  strengthTimeRange === 'this_week' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-400'
+                className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${
+                  strengthTimeRange === 'this_week'
+                    ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
+                    : 'text-slate-400 hover:text-white'
                 }`}
               >
                 THIS WEEK
               </button>
               <button
                 onClick={() => setStrengthTimeRange('30d')}
-                className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
-                  strengthTimeRange === '30d' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-400'
+                className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${
+                  strengthTimeRange === '30d'
+                    ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
+                    : 'text-slate-400 hover:text-white'
                 }`}
               >
                 LAST 30 DAYS
               </button>
               <button
                 onClick={() => setStrengthTimeRange('all_time')}
-                className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
-                  strengthTimeRange === 'all_time' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-400'
+                className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${
+                  strengthTimeRange === 'all_time'
+                    ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
+                    : 'text-slate-400 hover:text-white'
                 }`}
               >
                 ALL TIME
@@ -532,8 +638,10 @@ const Analytics: React.FC<AnalyticsProps> = ({ workouts }) => {
               <button
                 key={range}
                 onClick={() => setCardioTimeRange(range)}
-                className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
-                  cardioTimeRange === range ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-400'
+                className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${
+                  cardioTimeRange === range
+                    ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
+                    : 'text-slate-400 hover:text-white'
                 }`}
               >
                 Last {range.slice(0, -1)} Days
@@ -543,200 +651,253 @@ const Analytics: React.FC<AnalyticsProps> = ({ workouts }) => {
         </div>
       </div>
 
-      {/* Summary Stats Card */}
-      <div className="bg-slate-800/40 border border-slate-700/60 p-5 rounded-[2rem] shadow-sm animate-in fade-in slide-in-from-top-2 duration-300">
-        <div className="flex justify-between items-center mb-4">
-          <div className="flex items-center gap-2">
-            <Clock size={12} className="text-indigo-400" />
-            <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Summary · {rangeLabel}</h3>
-          </div>
-          <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest">
-            {activityType === 'strength' && strengthTimeRange === 'all_time' ? (
-              'All Recorded Sessions'
-            ) : (
-              `${rangeStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${rangeEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
-            )}
-          </span>
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-1">
-            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Sessions</p>
-            <div className="flex items-baseline gap-2">
-              <span className="text-3xl font-black text-white">{rangeStats.count}</span>
-              {activityType === 'strength' && strengthTimeRange === 'all_time' ? null : renderDelta(rangeStats.deltas.count)}
-            </div>
-          </div>
-          <div className="space-y-1">
-            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">
-              {activityType === 'strength' ? 'Working Sets' : 'Total Volume'}
-            </p>
-            <div className="flex items-baseline gap-2">
-              <span className="text-3xl font-black text-white">
-                {activityType === 'strength' ? currentWorkingSets.toLocaleString() : rangeStats.volume.toLocaleString()}
-              </span>
-              {activityType !== 'strength' && (
-                <span className="text-[10px] font-bold text-slate-500 uppercase">KM</span>
-              )}
-            </div>
-            {activityType === 'strength' ? (
-              strengthTimeRange === 'all_time' ? null : renderDelta(rangeStats.deltas.workingSets, 'sets')
-            ) : (
-              renderDelta(rangeStats.deltas.volume, 'KM')
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Strength: MUSCLE DISTRIBUTION (Donut Chart) | Cardio: VOLUME PER SESSION */}
       {activityType === 'strength' ? (
-        <div className="bg-slate-800/40 border border-slate-700/60 p-5 rounded-[2rem] shadow-sm">
-          <div className="flex justify-between items-start mb-6">
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <PieChartIcon size={14} className="text-emerald-400" />
-                <h3 className="text-xs font-black text-slate-200 uppercase tracking-[0.2em]">Muscle Distribution</h3>
+        <>
+          {/* Card 1: Muscle Distribution */}
+          <div className="bg-[#0b1320] border border-slate-800/80 p-5 rounded-[2rem] shadow-xl">
+            <div className="flex justify-between items-start mb-3">
+              <div>
+                <h3 className="text-sm font-black text-white uppercase tracking-wider">MUSCLE DISTRIBUTION</h3>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
+                  BASED ON WORKING SETS · {rangeLabel}
+                </p>
               </div>
-              <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Based on Working Sets</p>
+              <button
+                onClick={() => setShowInfoModal(true)}
+                className="w-7 h-7 rounded-full bg-slate-800/60 border border-slate-700/60 flex items-center justify-center text-slate-400 hover:text-white transition-colors"
+                title="Info"
+              >
+                <Info size={14} />
+              </button>
             </div>
-            <span className="text-[10px] font-black text-emerald-400 bg-emerald-400/10 px-2.5 py-1 rounded-full border border-emerald-400/20 uppercase tracking-widest">
-              {rangeLabel}
-            </span>
-          </div>
 
-          {muscleDistribution.totalWorkingSets > 0 ? (
-            <div>
-              {/* Donut Chart with Center Label */}
-              <div className="relative w-full h-56 flex items-center justify-center">
+            <div className="flex items-center justify-between gap-2">
+              {/* Donut Chart with center total and outside % labels */}
+              <div className="relative w-44 h-48 sm:w-52 sm:h-52 shrink-0 flex items-center justify-center">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
-                    <Tooltip 
-                      contentStyle={{backgroundColor: '#0f172a', borderRadius: '1rem', border: '1px solid #334155', color: '#fff'}}
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: '#090f1a',
+                        borderRadius: '1rem',
+                        border: '1px solid #1e293b',
+                        color: '#fff',
+                        fontSize: '11px'
+                      }}
                       formatter={(val: any, name: any) => {
+                        if (name === 'No Data') return ['0 sets (0%)', 'No Data'];
                         const item = muscleDistribution.data.find(d => d.name === name);
-                        return [`${val} sets (${item?.formattedPercentage}%)`, name];
+                        return [`${val} sets (${item?.percentage ? Math.round(item.percentage) : 0}%)`, name];
                       }}
                     />
                     <Pie
-                      data={muscleDistribution.data}
+                      data={donutChartData}
                       dataKey="sets"
                       nameKey="name"
                       cx="50%"
                       cy="50%"
-                      innerRadius={65}
-                      outerRadius={90}
-                      paddingAngle={3}
-                      stroke="#0f172a"
+                      startAngle={90}
+                      endAngle={-270}
+                      innerRadius={46}
+                      outerRadius={68}
+                      paddingAngle={muscleDistribution.totalWorkingSets > 0 ? 2 : 0}
+                      stroke="#0b1320"
                       strokeWidth={2}
+                      label={muscleDistribution.totalWorkingSets > 0 ? renderCustomizedLabel : undefined}
+                      labelLine={false}
                     >
-                      {muscleDistribution.data.map((entry) => (
+                      {donutChartData.map((entry) => (
                         <Cell key={entry.name} fill={entry.color} />
                       ))}
                     </Pie>
                   </PieChart>
                 </ResponsiveContainer>
-                
-                {/* Center Content: Total Working Sets */}
-                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                  <span className="text-3xl font-black text-white leading-none">
-                    {muscleDistribution.totalWorkingSets}
+
+                {/* Center total working sets label */}
+                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center">
+                  <span className="text-2xl font-black text-white leading-none">
+                    {muscleDistribution.totalWorkingSets.toLocaleString()}
                   </span>
-                  <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-1">
-                    Working Sets
+                  <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+                    TOTAL SETS
                   </span>
                 </div>
               </div>
 
-              {/* Legend with percentages and set counts */}
-              <div className="grid grid-cols-2 gap-2 mt-6 pt-4 border-t border-slate-700/40">
-                {muscleDistribution.data.map((item) => (
-                  <div key={item.name} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-900/40 border border-slate-700/30">
+              {/* Right: Legend list of all 10 muscle groups in canonical anatomical order */}
+              <div className="flex-1 flex flex-col justify-center gap-1 min-w-0 pr-1">
+                {allMuscleDisplayList.map((item) => (
+                  <div key={item.name} className="flex items-center justify-between text-[11px] leading-tight">
                     <div className="flex items-center gap-2 min-w-0">
-                      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
-                      <span className="text-[11px] font-black text-slate-200 uppercase truncate">{item.name}</span>
+                      <span
+                        className="w-2 h-2 rounded-full shrink-0"
+                        style={{ backgroundColor: item.color }}
+                      />
+                      <span className="text-slate-300 font-semibold truncate text-[11px]">
+                        {item.name}
+                      </span>
                     </div>
-                    <div className="flex items-center gap-1.5 shrink-0 pl-2">
-                      <span className="text-[10px] font-bold text-slate-500 uppercase">{item.sets}s</span>
-                      <span className="text-xs font-black text-emerald-400">{item.formattedPercentage}%</span>
-                    </div>
+                    <span className="font-bold text-white text-xs pl-2 tabular-nums">
+                      {item.formattedPercentage}%
+                    </span>
                   </div>
                 ))}
               </div>
             </div>
-          ) : (
-            <div className="h-48 flex flex-col items-center justify-center text-[10px] font-bold text-slate-600 uppercase tracking-widest gap-2">
-              <Dumbbell size={24} className="opacity-20" />
-              No working sets recorded in this period
-            </div>
-          )}
-        </div>
-      ) : (
-        /* Cardio Volume Chart (Unchanged) */
-        <div className="bg-slate-800/40 border border-slate-700/60 p-5 rounded-[2rem] shadow-sm">
-          <div className="flex flex-col gap-4 mb-6">
-            <div className="flex justify-between items-start">
+          </div>
+
+          {/* Card 2: Muscle Focus Heatmap */}
+          <div className="bg-[#0b1320] border border-slate-800/80 p-5 rounded-[2rem] shadow-xl">
+            <div className="flex items-center gap-2.5 mb-2">
+              <div className="w-7 h-7 rounded-lg bg-teal-500/10 border border-teal-500/30 flex items-center justify-center text-teal-400 shrink-0">
+                <Activity size={14} />
+              </div>
               <div>
-                <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">
-                  {aggregationType === 'weekly' ? 'Volume per Session' : 'Accumulated Volume'} · {rangeLabel}
-                </h3>
+                <h3 className="text-sm font-black text-white uppercase tracking-wider">MUSCLE FOCUS</h3>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
+                  VISUAL OVERVIEW · {rangeLabel}
+                </p>
               </div>
-              <div className="flex bg-slate-900/50 p-1 rounded-xl border border-slate-700/50">
-                <button 
-                  onClick={() => setAggregationType('weekly')}
-                  className={`px-4 py-1.5 text-[9px] font-black rounded-lg transition-all uppercase tracking-wider ${aggregationType === 'weekly' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500'}`}
-                >Sessions</button>
-                <button 
-                  onClick={() => setAggregationType('total')}
-                  className={`px-4 py-1.5 text-[9px] font-black rounded-lg transition-all uppercase tracking-wider ${aggregationType === 'total' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500'}`}
-                >Total</button>
+            </div>
+
+            <BodyHeatmap muscleFocus={muscleFocus} />
+          </div>
+
+          {/* Summary Stats (Sessions & Working Sets) */}
+          <div className="bg-[#0b1320] border border-slate-800/80 p-5 rounded-[2rem] shadow-xl">
+            <div className="flex justify-between items-center mb-4">
+              <div className="flex items-center gap-2">
+                <Clock size={12} className="text-emerald-400" />
+                <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Summary · {rangeLabel}</h3>
+              </div>
+              <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">
+                {strengthTimeRange === 'all_time' ? (
+                  'All Recorded Sessions'
+                ) : (
+                  `${rangeStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${rangeEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+                )}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Sessions</p>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-3xl font-black text-white">{rangeStats.count}</span>
+                  {strengthTimeRange === 'all_time' ? null : renderDelta(rangeStats.deltas.count)}
+                </div>
+              </div>
+              <div className="space-y-1">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Working Sets</p>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-3xl font-black text-white">{currentWorkingSets.toLocaleString()}</span>
+                  {strengthTimeRange === 'all_time' ? null : renderDelta(rangeStats.deltas.workingSets, 'sets')}
+                </div>
               </div>
             </div>
           </div>
-          
-          <div className="h-48 w-full">
-            {volumeData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                {aggregationType === 'weekly' ? (
-                  <BarChart data={volumeData}>
-                    <defs>
-                      <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#22d3ee" stopOpacity={0.8}/>
-                        <stop offset="95%" stopColor="#22d3ee" stopOpacity={0.05}/>
-                      </linearGradient>
-                    </defs>
-                    <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 10, fontWeight: '700'}} />
-                    <Tooltip contentStyle={{backgroundColor: '#0f172a', borderRadius: '1rem', border: '1px solid #334155', color: '#fff'}} cursor={{fill: '#1e293b', radius: 4}} formatter={(val: any) => [`${val.toLocaleString()} KM`, 'Volume']} />
-                    <Bar dataKey="volume" fill="url(#barGrad)" radius={[6, 6, 0, 0]} />
-                  </BarChart>
-                ) : (
-                  <AreaChart data={volumeData}>
-                    <defs>
-                      <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#22d3ee" stopOpacity={0.3}/>
-                        <stop offset="95%" stopColor="#22d3ee" stopOpacity={0}/>
-                      </linearGradient>
-                    </defs>
-                    <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 10, fontWeight: '700'}} />
-                    <Tooltip contentStyle={{backgroundColor: '#0f172a', borderRadius: '1rem', border: '1px solid #334155', color: '#fff'}} formatter={(val: any) => [`${val.toLocaleString()} KM`, 'Total Volume']} />
-                    <Area type="monotone" dataKey="volume" stroke="#22d3ee" fill="url(#areaGrad)" strokeWidth={3} />
-                  </AreaChart>
-                )}
-              </ResponsiveContainer>
-            ) : (
-              <div className="h-full flex items-center justify-center text-[10px] font-bold text-slate-600 uppercase tracking-widest">No activity in this period</div>
-            )}
+        </>
+      ) : (
+        /* Cardio Section */
+        <>
+          {/* Summary Stats Card */}
+          <div className="bg-[#0b1320] border border-slate-800/80 p-5 rounded-[2rem] shadow-xl animate-in fade-in slide-in-from-top-2 duration-300">
+            <div className="flex justify-between items-center mb-4">
+              <div className="flex items-center gap-2">
+                <Clock size={12} className="text-cyan-400" />
+                <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Summary · {rangeLabel}</h3>
+              </div>
+              <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">
+                {`${rangeStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${rangeEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Sessions</p>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-3xl font-black text-white">{rangeStats.count}</span>
+                  {renderDelta(rangeStats.deltas.count)}
+                </div>
+              </div>
+              <div className="space-y-1">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Total Volume</p>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-3xl font-black text-white">{rangeStats.volume.toLocaleString()}</span>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">KM</span>
+                </div>
+                {renderDelta(rangeStats.deltas.volume, 'KM')}
+              </div>
+            </div>
           </div>
-        </div>
+
+          {/* Cardio Volume Chart */}
+          <div className="bg-[#0b1320] border border-slate-800/80 p-5 rounded-[2rem] shadow-xl">
+            <div className="flex flex-col gap-4 mb-6">
+              <div className="flex justify-between items-start">
+                <div>
+                  <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
+                    {aggregationType === 'weekly' ? 'Volume per Session' : 'Accumulated Volume'} · {rangeLabel}
+                  </h3>
+                </div>
+                <div className="flex bg-slate-900/80 p-1 rounded-xl border border-slate-700/50">
+                  <button 
+                    onClick={() => setAggregationType('weekly')}
+                    className={`px-4 py-1.5 text-[9px] font-black rounded-lg transition-all uppercase tracking-wider ${aggregationType === 'weekly' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500'}`}
+                  >Sessions</button>
+                  <button 
+                    onClick={() => setAggregationType('total')}
+                    className={`px-4 py-1.5 text-[9px] font-black rounded-lg transition-all uppercase tracking-wider ${aggregationType === 'total' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500'}`}
+                  >Total</button>
+                </div>
+              </div>
+            </div>
+            
+            <div className="h-48 w-full">
+              {volumeData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  {aggregationType === 'weekly' ? (
+                    <BarChart data={volumeData}>
+                      <defs>
+                        <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#22d3ee" stopOpacity={0.8}/>
+                          <stop offset="95%" stopColor="#22d3ee" stopOpacity={0.05}/>
+                        </linearGradient>
+                      </defs>
+                      <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 10, fontWeight: '700'}} />
+                      <Tooltip contentStyle={{backgroundColor: '#0b1320', borderRadius: '1rem', border: '1px solid #1e293b', color: '#fff'}} cursor={{fill: '#1e293b', radius: 4}} formatter={(val: any) => [`${val.toLocaleString()} KM`, 'Volume']} />
+                      <Bar dataKey="volume" fill="url(#barGrad)" radius={[6, 6, 0, 0]} />
+                    </BarChart>
+                  ) : (
+                    <AreaChart data={volumeData}>
+                      <defs>
+                        <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#22d3ee" stopOpacity={0.3}/>
+                          <stop offset="95%" stopColor="#22d3ee" stopOpacity={0.05}/>
+                        </linearGradient>
+                      </defs>
+                      <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 10, fontWeight: '700'}} />
+                      <Tooltip contentStyle={{backgroundColor: '#0b1320', borderRadius: '1rem', border: '1px solid #1e293b', color: '#fff'}} formatter={(val: any) => [`${val.toLocaleString()} KM`, 'Total Volume']} />
+                      <Area type="monotone" dataKey="volume" stroke="#22d3ee" fill="url(#areaGrad)" strokeWidth={3} />
+                    </AreaChart>
+                  )}
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-full flex items-center justify-center text-[10px] font-bold text-slate-600 uppercase tracking-widest">No activity in this period</div>
+              )}
+            </div>
+          </div>
+        </>
       )}
 
-      {/* Exercise Progress Tracker (Unchanged) */}
-      <div className="bg-slate-800/40 border border-slate-700/60 p-5 rounded-[2rem] shadow-sm overflow-hidden relative">
+      {/* Exercise Progress Tracker */}
+      <div className="bg-[#0b1320] border border-slate-800/80 p-5 rounded-[2rem] shadow-xl overflow-hidden relative">
         <div className="absolute top-0 right-0 w-32 h-32 bg-yellow-400/5 blur-[80px] -mr-16 -mt-16 rounded-full pointer-events-none"></div>
         
         <div className="flex flex-col mb-6 gap-4">
           <div className="flex justify-between items-start">
             <div>
-              <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-1">Progress Tracker</h3>
+              <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Progress Tracker</h3>
               <p className="text-2xl font-black text-white flex items-center gap-2">
                 {absoluteMax.toLocaleString()} <span className="text-xs font-bold text-slate-500 uppercase">{activityType === 'strength' ? 'KG' : 'KM'} MAX</span>
               </p>
@@ -791,15 +952,15 @@ const Analytics: React.FC<AnalyticsProps> = ({ workouts }) => {
           )}
         </div>
 
-        {/* Global Milestones Section (Unchanged) */}
+        {/* Global Milestones Section */}
         <div className="mt-8 space-y-3">
-          <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] px-2 flex items-center gap-2">
+          <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] px-2 flex items-center gap-2">
             <Award size={12} className="text-yellow-400" />
             All-Time Milestones
           </h4>
           
           {bestPR ? (
-            <div className="bg-slate-900/40 p-4 rounded-2xl border border-slate-700/30 flex items-center justify-between">
+            <div className="bg-slate-900/60 p-4 rounded-2xl border border-slate-800/80 flex items-center justify-between">
               <div className="flex items-center gap-4">
                 <div className="w-10 h-10 rounded-xl bg-yellow-400/10 flex items-center justify-center shadow-inner">
                   <Trophy size={20} className="text-yellow-400 fill-current" />
@@ -810,21 +971,60 @@ const Analytics: React.FC<AnalyticsProps> = ({ workouts }) => {
                     <p className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">{bestPR.date}</p>
                   </div>
                   {prevPR && (
-                    <p className="text-[9px] font-black text-slate-600 uppercase tracking-widest mt-0.5">
+                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-0.5">
                       Prev Record: {prevPR.value.toLocaleString()} {activityType === 'strength' ? 'KG' : 'KM'} · {prevPR.date}
                     </p>
                   )}
                 </div>
               </div>
-              <ChevronRight size={14} className="text-slate-700" />
+              <ChevronRight size={14} className="text-slate-600" />
             </div>
           ) : (
-            <div className="bg-slate-900/20 p-4 rounded-2xl border border-dashed border-slate-800 text-center">
-              <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest italic">No records found for {selectedExercise}</p>
+            <div className="bg-slate-900/30 p-4 rounded-2xl border border-dashed border-slate-800 text-center">
+              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest italic">No records found for {selectedExercise}</p>
             </div>
           )}
         </div>
       </div>
+
+      {/* Muscle Tracking Information Modal */}
+      {showInfoModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-[#0b1320] border border-slate-700/80 p-6 rounded-3xl max-w-sm w-full shadow-2xl space-y-4">
+            <div className="flex justify-between items-center">
+              <div className="flex items-center gap-2 text-teal-400 font-black text-sm uppercase tracking-wider">
+                <Info size={18} />
+                <span>Muscle Tracking Info</span>
+              </div>
+              <button
+                onClick={() => setShowInfoModal(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="text-xs text-slate-300 space-y-3 leading-relaxed">
+              <p>
+                <strong className="text-white">Muscle Distribution:</strong> Shows the proportion of completed working sets allocated across each primary muscle group for the selected period.
+              </p>
+              <p>
+                <strong className="text-white">Muscle Focus:</strong> Evaluates your training stimulus across your body:
+              </p>
+              <ul className="list-disc pl-4 space-y-1 text-slate-400">
+                <li><span className="text-[#00f5c4] font-semibold">Higher Focus:</span> ≥ 13% of completed sets</li>
+                <li><span className="text-[#0d9488] font-semibold">Moderate:</span> 5% - 12% of completed sets</li>
+                <li><span className="text-slate-500 font-semibold">Lower Focus:</span> &lt; 5% or not yet stimulated</li>
+              </ul>
+            </div>
+            <button
+              onClick={() => setShowInfoModal(false)}
+              className="w-full py-2.5 rounded-xl bg-teal-500/20 border border-teal-500/40 text-teal-300 font-bold text-xs uppercase tracking-wider hover:bg-teal-500/30 transition-all"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
